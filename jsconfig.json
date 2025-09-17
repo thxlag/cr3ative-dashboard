@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "allowSyntheticDefaultImports": true,
+    "checkJs": false,          // disable TS type-checking for .js files
+    "jsx": "preserve"
+  },
+  "exclude": ["node_modules", ".git"]
+}

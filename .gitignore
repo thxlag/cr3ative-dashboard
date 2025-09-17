@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+modules/
+
+# build outputs
+src/web/app/dist/
+dist/
+
+# env / secrets
+.env
+.env.*
+client_secret_*.json
+
+data/
+
+# editor settings
+.vscode/
+
+# logs / misc
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

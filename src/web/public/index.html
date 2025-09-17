@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cr3ative Dashboard</title>
+    <!-- Use an inline data URI favicon instead of a file to avoid 404 errors -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --bg-alt: #111c34;
+        --card: #1e293b;
+        --accent: #38bdf8;
+        --accent-soft: rgba(56, 189, 248, 0.12);
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(8, 47, 73, 0.85)), url('https://grainy-gradients.vercel.app/noise.svg');
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 16px;
+      }
+      .shell {
+        width: min(1100px, 100%);
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        border-radius: 24px;
+        padding: 32px;
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.45);
+        backdrop-filter: blur(20px);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 28px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .brand-avatar {
+        width: 60px;
+        height: 60px;
+        border-radius: 18px;
+        background: var(--accent-soft);
+        display: grid;
+        place-items: center;
+        font-weight: 600;
+        font-size: 22px;
+        letter-spacing: 1px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 600;
+      }
+      p.sub {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      button, a.button {
+        outline: none;
+        border: none;
+        border-radius: 14px;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+      button.primary, a.button.primary {
+        background: linear-gradient(135deg, #38bdf8, #2563eb);
+        color: white;
+        box-shadow: 0 10px 30px rgba(37, 99, 235, 0.35);
+      }
+      button.primary:hover, a.button.primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 40px rgba(37, 99, 235, 0.45);
+      }
+      button.ghost {
+        background: transparent;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        padding: 24px;
+        border-radius: 20px;
+        background: linear-gradient(160deg, rgba(30, 41, 59, 0.82), rgba(30, 64, 175, 0.18));
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        min-height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .card h3 {
+        margin: 0 0 6px;
+        font-size: 17px;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .card .value {
+        font-size: 32px;
+        font-weight: 700;
+      }
+      .card small {
+        color: var(--muted);
+      }
+      .status {
+        border-radius: 16px;
+        padding: 18px 22px;
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.2);
+        margin-bottom: 26px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .status span {
+        font-weight: 600;
+        color: var(--accent);
+      }
+      .guild-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .guild-tag {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        color: var(--text);
+        font-size: 13px;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        border-radius: 22px;
+        background: rgba(148, 163, 184, 0.08);
+        border: 1px dashed rgba(148, 163, 184, 0.2);
+      }
+      
+      /* New styles for enhanced dashboard */
+      .layout {
+        display: flex;
+        gap: 24px;
+        margin-top: 20px;
+      }
+      
+      .sidebar {
+        width: 240px;
+        flex-shrink: 0;
+      }
+      
+      .main-content {
+        flex-grow: 1;
+      }
+      
+      .nav-section {
+        margin-bottom: 20px;
+      }
+      
+      .nav-section h3 {
+        font-size: 14px;
+        color: var(--muted);
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        margin-bottom: 4px;
+        cursor: pointer;
+        transition: background 0.2s;
+        font-weight: 500;
+      }
+      
+      .nav-item:hover {
+        background: rgba(148, 163, 184, 0.1);
+      }
+      
+      .nav-item.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      
+      .server-select {
+        width: 100%;
+        padding: 12px;
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
+        color: var(--text);
+        margin-bottom: 16px;
+        font-weight: 500;
+      }
+      
+      .connection-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        margin-bottom: 20px;
+      }
+      
+      .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+      
+      .status-online {
+        background: #10b981;
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+      }
+      
+      .status-offline {
+        background: #ef4444;
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+      }
+      
+      .panel {
+        display: none;
+      }
+      
+      .panel.active {
+        display: block;
+      }
+      
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      
+      .stat-card {
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+      }
+      
+      .stat-card h4 {
+        margin: 0 0 8px;
+        color: var(--muted);
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      
+      .stat-card .stat-value {
+        font-size: 24px;
+        font-weight: 700;
+      }
+      
+      .chart-container {
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 24px;
+        height: 300px;
+      }
+      
+      .search-bar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      
+      .search-input {
+        flex-grow: 1;
+        padding: 12px 16px;
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
+        color: var(--text);
+      }
+      
+      .table-container {
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      
+      th {
+        text-align: left;
+        padding: 16px;
+        background: rgba(15, 23, 42, 0.5);
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      
+      td {
+        padding: 14px 16px;
+        border-top: 1px solid rgba(148, 163, 184, 0.1);
+      }
+      
+      .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      
+      .badge-ban {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+      }
+      
+      .badge-kick {
+        background: rgba(249, 115, 22, 0.2);
+        color: #fb923c;
+      }
+      
+      .badge-mute {
+        background: rgba(234, 179, 8, 0.2);
+        color: #facc15;
+      }
+      
+      .badge-warn {
+        background: rgba(168, 85, 247, 0.2);
+        color: #c084fc;
+      }
+      
+      .settings-group {
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 24px;
+      }
+      
+      .settings-group h3 {
+        margin-top: 0;
+        margin-bottom: 16px;
+        font-size: 18px;
+        color: var(--text);
+      }
+      
+      .form-group {
+        margin-bottom: 16px;
+      }
+      
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+      }
+      
+      .form-group input[type="text"],
+      .form-group input[type="number"],
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        color: var(--text);
+      }
+      
+      .form-group textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+      
+      .toggle-group {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      
+      .toggle-label {
+        flex-grow: 1;
+      }
+      
+      .commands-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+      }
+      
+      .command-item {
+        background: rgba(15, 23, 42, 0.5);
+        border-radius: 10px;
+        padding: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      
+      .command-name {
+        font-weight: 500;
+      }
+      
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+      
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(148, 163, 184, 0.2);
+        transition: .4s;
+        border-radius: 24px;
+      }
+      
+      .toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: var(--text);
+        transition: .4s;
+        border-radius: 50%;
+      }
+      
+      input:checked + .toggle-slider {
+        background-color: var(--accent);
+      }
+      
+      input:checked + .toggle-slider:before {
+        transform: translateX(20px);
+      }
+      
+      @media (max-width: 920px) {
+        .layout {
+          flex-direction: column;
+        }
+        
+        .sidebar {
+          width: 100%;
+          margin-bottom: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell" id="dashboard">
+      <header>
+        <div class="brand">
+          <div class="brand-avatar">CB</div>
+          <div>
+            <h1>Cr3ative Control Center</h1>
+            <p class="sub">Monitor activity, tweak systems, and keep your communities humming.</p>
+          </div>
+        </div>
+        <div class="actions" id="action-bar">
+          <a class="button primary" href="/auth/login">Log in with Discord</a>
+        </div>
+      </header>
+
+      <section id="status-area"></section>
+
+      <!-- Main Dashboard Layout with Sidebar -->
+      <section id="full-dashboard" style="display: none;">
+        <div class="layout">
+          <!-- Sidebar Navigation -->
+          <div class="sidebar">
+            <select class="server-select" id="server-select">
+              <option value="">Select a server...</option>
+            </select>
+            
+            <div class="connection-status">
+              <div class="status-indicator status-online" id="connection-indicator"></div>
+              <span id="connection-text">Bot online</span>
+            </div>
+            
+            <div class="nav-section">
+              <h3>Dashboard</h3>
+              <div class="nav-item active" data-panel="overview">Overview</div>
+              <div class="nav-item" data-panel="analytics">Analytics</div>
+            </div>
+            
+            <div class="nav-section">
+              <h3>Management</h3>
+              <div class="nav-item" data-panel="commands">Commands</div>
+              <div class="nav-item" data-panel="moderation">Moderation</div>
+              <div class="nav-item" data-panel="settings">Settings</div>
+            </div>
+            
+            <div class="nav-section">
+              <h3>Configuration</h3>
+              <div class="nav-item" data-panel="economy">Economy</div>
+              <div class="nav-item" data-panel="casino">Casino</div>
+              <div class="nav-item" data-panel="pokemon">Pokémon</div>
+              <div class="nav-item" data-panel="jobs">Jobs</div>
+              <div class="nav-item" data-panel="streaming">Streaming</div>
+            </div>
+          </div>
+          
+          <!-- Main Content Area -->
+          <div class="main-content">
+            <!-- Overview Panel -->
+            <div class="panel active" id="panel-overview">
+              <h2>Overview</h2>
+              
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <h4>Total Servers</h4>
+                  <div class="stat-value" id="stat-servers">--</div>
+                </div>
+                <div class="stat-card">
+                  <h4>Total Users</h4>
+                  <div class="stat-value" id="stat-users">--</div>
+                </div>
+                <div class="stat-card">
+                  <h4>Bot Latency</h4>
+                  <div class="stat-value" id="stat-latency">--</div>
+                </div>
+                <div class="stat-card">
+                  <h4>Commands Today</h4>
+                  <div class="stat-value" id="stat-commands">--</div>
+                </div>
+              </div>
+              
+              <div class="chart-container">
+                <h3>Top Commands</h3>
+                <div id="chart-top-commands" style="height: 250px;"></div>
+              </div>
+              
+              <div class="card">
+                <h3>Quick Actions</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                  <button class="primary" id="btn-restart-bot">Restart Bot</button>
+                  <button class="ghost" id="btn-sync-commands">Sync Commands</button>
+                  <button class="ghost" id="btn-clear-cache">Clear Cache</button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Analytics Panel -->
+            <div class="panel" id="panel-analytics">
+              <h2>Analytics</h2>
+              
+              <div class="chart-container">
+                <h3>Member Growth</h3>
+                <div id="chart-member-growth" style="height: 250px;"></div>
+              </div>
+              
+              <div class="chart-container">
+                <h3>Message Activity</h3>
+                <div id="chart-message-activity" style="height: 250px;"></div>
+              </div>
+              
+              <div class="chart-container">
+                <h3>Role Distribution</h3>
+                <div id="chart-role-distribution" style="height: 250px;"></div>
+              </div>
+            </div>
+            
+            <!-- Commands Panel -->
+            <div class="panel" id="panel-commands">
+              <h2>Commands Management</h2>
+              
+              <div class="search-bar">
+                <input type="text" class="search-input" placeholder="Search commands..." id="commands-search">
+                <button class="primary" id="btn-save-commands">Save Changes</button>
+              </div>
+              
+              <div class="settings-group">
+                <h3>Command Categories</h3>
+                
+                <div class="toggle-group">
+                  <div class="toggle-label">Economy Commands</div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-category-economy" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div class="toggle-group">
+                  <div class="toggle-label">Casino Commands</div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-category-casino" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div class="toggle-group">
+                  <div class="toggle-label">Moderation Commands</div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-category-moderation" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div class="toggle-group">
+                  <div class="toggle-label">Utility Commands</div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-category-utility" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div class="toggle-group">
+                  <div class="toggle-label">Fun Commands</div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-category-fun" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+              
+              <div class="settings-group">
+                <h3>Individual Commands</h3>
+                <div class="commands-list" id="commands-list">
+                  <!-- Commands will be populated here -->
+                </div>
+              </div>
+            </div>
+            
+            <!-- Moderation Panel -->
+            <div class="panel" id="panel-moderation">
+              <h2>Moderation Logs</h2>
+              
+              <div class="search-bar">
+                <input type="text" class="search-input" placeholder="Search by user, moderator, or reason..." id="modlogs-search">
+                <select class="search-input" style="flex-grow: 0; width: 150px;" id="modlogs-filter">
+                  <option value="all">All Actions</option>
+                  <option value="ban">Bans</option>
+                  <option value="kick">Kicks</option>
+                  <option value="mute">Mutes</option>
+                  <option value="warn">Warnings</option>
+                </select>
+              </div>
+              
+              <div class="table-container">
+                <table id="modlogs-table">
+                  <thead>
+                    <tr>
+                      <th>Case ID</th>
+                      <th>Action</th>
+                      <th>User</th>
+                      <th>Moderator</th>
+                      <th>Reason</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody id="modlogs-body">
+                    <!-- Moderation logs will be populated here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Settings Panel -->
+            <div class="panel" id="panel-settings">
+              <h2>General Settings</h2>
+              
+              <div class="settings-group">
+                <h3>Bot Configuration</h3>
+                <form id="bot-settings-form">
+                  <div class="form-group">
+                    <label for="bot-prefix">Command Prefix</label>
+                    <input type="text" id="bot-prefix" placeholder="!" maxlength="5">
+                  </div>
+                  
+                  <div class="toggle-group">
+                    <div class="toggle-label">Enable Slash Commands</div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="toggle-slash-commands" checked>
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                  
+                  <button type="submit" class="primary">Save Bot Settings</button>
+                </form>
+              </div>
+              
+              <div class="settings-group">
+                <h3>Welcome Messages</h3>
+                <form id="welcome-settings-form">
+                  <div class="form-group">
+                    <label for="welcome-channel">Welcome Channel</label>
+                    <select id="welcome-channel">
+                      <option value="">Select channel...</option>
+                    </select>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="welcome-message">Welcome Message</label>
+                    <textarea id="welcome-message" placeholder="Welcome {user} to {server}! You are member #{count}."></textarea>
+                  </div>
+                  
+                  <p style="color: var(--muted); font-size: 14px; margin-bottom: 20px;">
+                    Available variables: {user}, {server}, {count}, {mention}
+                  </p>
+                  
+                  <div class="toggle-group">
+                    <div class="toggle-label">Enable Welcome Messages</div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="toggle-welcome" checked>
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                  
+                  <button type="submit" class="primary">Save Welcome Settings</button>
+                </form>
+              </div>
+              
+              <div class="settings-group">
+                <h3>Leave Messages</h3>
+                <form id="leave-settings-form">
+                  <div class="form-group">
+                    <label for="leave-channel">Leave Channel</label>
+                    <select id="leave-channel">
+                      <option value="">Select channel...</option>
+                    </select>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="leave-message">Leave Message</label>
+                    <textarea id="leave-message" placeholder="{user} has left the server. We now have {count} members."></textarea>
+                  </div>
+                  
+                  <p style="color: var(--muted); font-size: 14px; margin-bottom: 20px;">
+                    Available variables: {user}, {server}, {count}
+                  </p>
+                  
+                  <div class="toggle-group">
+                    <div class="toggle-label">Enable Leave Messages</div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="toggle-leave" checked>
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                  
+                  <button type="submit" class="primary">Save Leave Settings</button>
+                </form>
+              </div>
+              
+              <div class="settings-group">
+                <h3>Role Permissions</h3>
+                <form id="permissions-settings-form">
+                  <div class="form-group">
+                    <label for="admin-role">Admin Role</label>
+                    <select id="admin-role">
+                      <option value="">Select role...</option>
+                    </select>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="mod-role">Moderator Role</label>
+                    <select id="mod-role">
+                      <option value="">Select role...</option>
+                    </select>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label for="dj-role">DJ Role</label>
+                    <select id="dj-role">
+                      <option value="">Select role...</option>
+                    </select>
+                  </div>
+                  
+                  <button type="submit" class="primary">Save Permission Settings</button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- Economy Settings Panel -->
+            <div class="panel" id="panel-economy">
+              <h2>Economy Settings</h2>
+              <div class="settings-group">
+                <h3>Economy Configuration</h3>
+                <form id="economy-form">
+                  <div class="form-group">
+                    <label for="maxDeposit">Max Deposit</label>
+                    <input type="number" id="maxDeposit">
+                  </div>
+                  <div class="form-group">
+                    <label for="taxRate">Tax Rate (%)</label>
+                    <input type="number" id="taxRate" step="0.01">
+                  </div>
+                  <div class="form-group">
+                    <label for="withdrawLimit">Withdraw Limit</label>
+                    <input type="number" id="withdrawLimit">
+                  </div>
+                  <button type="submit" class="primary">Save Economy Settings</button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- Casino Settings Panel -->
+            <div class="panel" id="panel-casino">
+              <h2>Casino Settings</h2>
+              <div class="settings-group">
+                <h3>Casino Configuration</h3>
+                <form id="casino-form">
+                  <div class="form-group">
+                    <label for="slotsRTP">Slots RTP</label>
+                    <input type="number" id="slotsRTP" step="0.01">
+                  </div>
+                  <div class="form-group">
+                    <label for="bjFee">Blackjack Fee (%)</label>
+                    <input type="number" id="bjFee" step="0.01">
+                  </div>
+                  <div class="form-group">
+                    <label for="rouletteEdge">Roulette Edge (%)</label>
+                    <input type="number" id="rouletteEdge" step="0.01">
+                  </div>
+                  <button type="submit" class="primary">Save Casino Settings</button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- Pokémon Settings Panel -->
+            <div class="panel" id="panel-pokemon">
+              <h2>Pokémon Settings</h2>
+              <div class="settings-group">
+                <h3>Pokémon Configuration</h3>
+                <form id="pokemon-form">
+                  <div class="form-group">
+                    <label for="spawnChance">Spawn Chance (%)</label>
+                    <input type="number" id="spawnChance" step="0.01">
+                  </div>
+                  <div class="form-group">
+                    <label for="spawnCooldown">Spawn Cooldown (s)</label>
+                    <input type="number" id="spawnCooldown">
+                  </div>
+                  <div class="form-group">
+                    <label for="despawnTime">Despawn Time (s)</label>
+                    <input type="number" id="despawnTime">
+                  </div>
+                  <button type="submit" class="primary">Save Pokémon Settings</button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- Jobs Settings Panel -->
+            <div class="panel" id="panel-jobs">
+              <h2>Jobs Settings</h2>
+              <div class="settings-group">
+                <h3>Jobs Configuration</h3>
+                <form id="jobs-form">
+                  <div class="form-group">
+                    <label for="streakBonus">Streak Bonus (%/day)</label>
+                    <input type="number" id="streakBonus" step="0.01">
+                  </div>
+                  <div class="form-group">
+                    <label for="skillMult">Skill Multiplier (%/level)</label>
+                    <input type="number" id="skillMult" step="0.01">
+                  </div>
+                  <button type="submit" class="primary">Save Jobs Settings</button>
+                </form>
+              </div>
+            </div>
+            
+            <!-- Streaming Settings Panel -->
+            <div class="panel" id="panel-streaming">
+              <h2>Streaming Settings</h2>
+              <div class="settings-group">
+                <h3>Streaming Configuration</h3>
+                <form id="streaming-form">
+                  <div class="form-group">
+                    <label for="twitchChannel">Twitch Channel ID</label>
+                    <input type="text" id="twitchChannel">
+                  </div>
+                  <div class="form-group">
+                    <label for="youtubeChannel">YouTube Channel ID</label>
+                    <input type="text" id="youtubeChannel">
+                  </div>
+                  <div class="form-group">
+                    <label for="notifyChannel">Notif Channel ID</label>
+                    <input type="text" id="notifyChannel">
+                  </div>
+                  <div class="form-group">
+                    <label for="thumbInterval">Thumbnail Interval (s)</label>
+                    <input type="number" id="thumbInterval">
+                  </div>
+                  <button type="submit" class="primary">Save Streaming Settings</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="empty-state" id="empty-state" style="display: none;">
+        <p style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">You are signed in but no Manage Server guilds were detected.</p>
+        <p style="color: var(--muted); margin-bottom: 20px;">Grant the bot access or invite it to the communities you manage to unlock analytics and controls.</p>
+        <button class="primary" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <script>
+      const actionBar = document.getElementById('action-bar');
+      const statusArea = document.getElementById('status-area');
+      const emptyState = document.getElementById('empty-state');
+      const fullDashboard = document.getElementById('full-dashboard');
+      const serverSelect = document.getElementById('server-select');
+      const connectionIndicator = document.getElementById('connection-indicator');
+      const connectionText = document.getElementById('connection-text');
+      const navItems = document.querySelectorAll('.nav-item');
+      const panels = document.querySelectorAll('.panel');
+      let socket = null;
+
+      async function fetchJSON(url, options) {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+      }
+
+      // Initialize WebSocket connection
+      function initWebSocket() {
+        if (socket) {
+          socket.close();
+        }
+        
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        
+        socket = new WebSocket(wsUrl);
+        
+        socket.onopen = function() {
+          console.log('WebSocket connected');
+          updateConnectionStatus(true);
+        };
+        
+        socket.onclose = function() {
+          console.log('WebSocket disconnected');
+          updateConnectionStatus(false);
+          
+          // Try to reconnect after 5 seconds
+          setTimeout(initWebSocket, 5000);
+        };
+        
+        socket.onmessage = function(event) {
+          const data = JSON.parse(event.data);
+          
+          switch (data.type) {
+            case 'stats':
+              updateStats(data.payload);
+              break;
+            case 'modlog':
+              addModLogEntry(data.payload);
+              break;
+            case 'botStatus':
+              updateConnectionStatus(data.payload.online);
+              break;
+          }
+        };
+      }
+      
+      function updateConnectionStatus(online) {
+        if (online) {
+          connectionIndicator.className = 'status-indicator status-online';
+          connectionText.textContent = 'Bot online';
+        } else {
+          connectionIndicator.className = 'status-indicator status-offline';
+          connectionText.textContent = 'Bot offline';
+        }
+      }
+      
+      // Navigation between panels
+      navItems.forEach(item => {
+        item.addEventListener('click', () => {
+          const targetPanel = item.getAttribute('data-panel');
+          
+          // Update active nav item
+          navItems.forEach(nav => nav.classList.remove('active'));
+          item.classList.add('active');
+          
+          // Show target panel, hide others
+          panels.forEach(panel => {
+            if (panel.id === `panel-${targetPanel}`) {
+              panel.classList.add('active');
+            } else {
+              panel.classList.remove('active');
+            }
+          });
+        });
+      });
+      
+      // Load server list
+      async function loadServerList() {
+        try {
+          const guilds = await fetchJSON('/api/admin/guilds');
+          if (!serverSelect) return;
+
+          serverSelect.innerHTML = '';
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = 'Select a server...';
+          placeholder.disabled = guilds.length === 1;
+          placeholder.hidden = guilds.length === 1;
+          serverSelect.appendChild(placeholder);
+
+          guilds.forEach(guild => {
+            const option = document.createElement('option');
+            option.value = guild.id;
+            option.textContent = guild.name;
+            serverSelect.appendChild(option);
+          });
+
+          if (guilds.length === 1) {
+            serverSelect.value = guilds[0].id;
+            serverSelect.disabled = true;
+            await loadGuildData(guilds[0].id);
+            connectionText.textContent = guilds[0].name;
+          }
+
+          if (!serverSelect.hasAttribute('data-listener')) {
+            serverSelect.addEventListener('change', () => {
+              const guildId = serverSelect.value;
+              if (guildId) {
+                loadGuildData(guildId);
+              }
+            });
+            serverSelect.setAttribute('data-listener', 'true');
+          }
+
+          if (guilds.length > 1 && !serverSelect.value && guilds[0]) {
+            serverSelect.value = guilds[0].id;
+            loadGuildData(guilds[0].id);
+          }
+        } catch (error) {
+          console.error('Failed to load server list:', error);
+        }
+      }
+      
+      // Load guild-specific data
+      async function loadGuildData(guildId) {
+        try {
+          const guildData = await fetchJSON(`/api/admin/guilds/${guildId}`);
+          
+          // Update stats
+          document.getElementById('stat-users').textContent = new Intl.NumberFormat().format(guildData.memberCount);
+          
+          // Update channels and roles dropdowns
+          updateChannelsDropdown(guildData.channels);
+          updateRolesDropdown(guildData.roles);
+          
+          // Load command settings
+          loadCommandSettings(guildId);
+          
+          // Load moderation logs
+          loadModerationLogs(guildId);
+          
+          // Load guild settings
+          loadGuildSettings(guildId);
+        } catch (error) {
+          console.error('Failed to load guild data:', error);
+        }
+      }
+      
+      // Update channels dropdown
+      function updateChannelsDropdown(channels) {
+        const welcomeChannel = document.getElementById('welcome-channel');
+        const leaveChannel = document.getElementById('leave-channel');
+        
+        welcomeChannel.innerHTML = '<option value="">Select channel...</option>';
+        leaveChannel.innerHTML = '<option value="">Select channel...</option>';
+        
+        channels.forEach(channel => {
+          if (channel.type === 'GUILD_TEXT') {
+            const option1 = document.createElement('option');
+            option1.value = channel.id;
+            option1.textContent = `#${channel.name}`;
+            welcomeChannel.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = channel.id;
+            option2.textContent = `#${channel.name}`;
+            leaveChannel.appendChild(option2);
+          }
+        });
+      }
+      
+      // Update roles dropdown
+      function updateRolesDropdown(roles) {
+        const adminRole = document.getElementById('admin-role');
+        const modRole = document.getElementById('mod-role');
+        const djRole = document.getElementById('dj-role');
+        
+        adminRole.innerHTML = '<option value="">Select role...</option>';
+        modRole.innerHTML = '<option value="">Select role...</option>';
+        djRole.innerHTML = '<option value="">Select role...</option>';
+        
+        roles.forEach(role => {
+          const option1 = document.createElement('option');
+          option1.value = role.id;
+          option1.textContent = role.name;
+          adminRole.appendChild(option1);
+          
+          const option2 = document.createElement('option');
+          option2.value = role.id;
+          option2.textContent = role.name;
+          modRole.appendChild(option2);
+          
+          const option3 = document.createElement('option');
+          option3.value = role.id;
+          option3.textContent = role.name;
+          djRole.appendChild(option3);
+        });
+      }
+      
+      // Load command settings
+      async function loadCommandSettings(guildId) {
+        try {
+          const commands = await fetchJSON(`/api/admin/guilds/${guildId}/commands`);
+          const commandsList = document.getElementById('commands-list');
+          
+          commandsList.innerHTML = '';
+          
+          commands.forEach(command => {
+            const commandItem = document.createElement('div');
+            commandItem.className = 'command-item';
+            commandItem.innerHTML = `
+              <div class="command-name">${command.name}</div>
+              <label class="toggle-switch">
+                <input type="checkbox" data-command="${command.id}" ${command.enabled ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+              </label>
+            `;
+            commandsList.appendChild(commandItem);
+          });
+          
+          // Category toggles
+          document.querySelectorAll('[id^="toggle-category-"]').forEach(toggle => {
+            toggle.addEventListener('change', function() {
+              const category = this.id.replace('toggle-category-', '');
+              const categoryCommands = commands.filter(cmd => cmd.category === category);
+              const categoryCommandIds = categoryCommands.map(cmd => cmd.id);
+              
+              document.querySelectorAll(`[data-command]`).forEach(checkbox => {
+                if (categoryCommandIds.includes(checkbox.getAttribute('data-command'))) {
+                  checkbox.checked = this.checked;
+                }
+              });
+            });
+          });
+          
+          // Save button
+          document.getElementById('btn-save-commands').addEventListener('click', async () => {
+            const updatedCommands = [];
+            
+            document.querySelectorAll('[data-command]').forEach(checkbox => {
+              updatedCommands.push({
+                id: checkbox.getAttribute('data-command'),
+                enabled: checkbox.checked
+              });
+            });
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/commands`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ commands: updatedCommands })
+              });
+              
+              alert('Command settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save command settings:', error);
+              alert('Failed to save command settings. Please try again.');
+            }
+          });
+        } catch (error) {
+          console.error('Failed to load command settings:', error);
+        }
+      }
+      
+      // Load moderation logs
+      async function loadModerationLogs(guildId) {
+        try {
+          const modlogs = await fetchJSON(`/api/admin/guilds/${guildId}/modlogs`);
+          const modlogsBody = document.getElementById('modlogs-body');
+          
+          modlogsBody.innerHTML = '';
+          
+          modlogs.forEach(log => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${log.caseId}</td>
+              <td><span class="badge badge-${log.action.toLowerCase()}">${log.action}</span></td>
+              <td>${log.user}</td>
+              <td>${log.moderator}</td>
+              <td>${log.reason || '<em>No reason provided</em>'}</td>
+              <td>${new Date(log.timestamp).toLocaleString()}</td>
+            `;
+            modlogsBody.appendChild(row);
+          });
+          
+          // Search and filter
+          const search = document.getElementById('modlogs-search');
+          const filter = document.getElementById('modlogs-filter');
+          
+          function filterModlogs() {
+            const searchTerm = search.value.toLowerCase();
+            const filterValue = filter.value;
+            
+            Array.from(modlogsBody.children).forEach(row => {
+              const action = row.children[1].textContent.toLowerCase();
+              const user = row.children[2].textContent.toLowerCase();
+              const moderator = row.children[3].textContent.toLowerCase();
+              const reason = row.children[4].textContent.toLowerCase();
+              
+              const matchesSearch = !searchTerm || 
+                user.includes(searchTerm) || 
+                moderator.includes(searchTerm) || 
+                reason.includes(searchTerm);
+                
+              const matchesFilter = filterValue === 'all' || action === filterValue;
+              
+              row.style.display = matchesSearch && matchesFilter ? '' : 'none';
+            });
+          }
+          
+          search.addEventListener('input', filterModlogs);
+          filter.addEventListener('change', filterModlogs);
+        } catch (error) {
+          console.error('Failed to load moderation logs:', error);
+        }
+      }
+      
+      // Load guild settings
+      async function loadGuildSettings(guildId) {
+        try {
+          const settings = await fetchJSON(`/api/admin/guilds/${guildId}/settings`);
+          
+          // Bot settings
+          document.getElementById('bot-prefix').value = settings.prefix || '!';
+          document.getElementById('toggle-slash-commands').checked = settings.slashCommands !== false;
+          
+          // Welcome settings
+          document.getElementById('welcome-channel').value = settings.welcomeChannelId || '';
+          document.getElementById('welcome-message').value = settings.welcomeMessage || '';
+          document.getElementById('toggle-welcome').checked = settings.welcomeEnabled !== false;
+          
+          // Leave settings
+          document.getElementById('leave-channel').value = settings.leaveChannelId || '';
+          document.getElementById('leave-message').value = settings.leaveMessage || '';
+          document.getElementById('toggle-leave').checked = settings.leaveEnabled !== false;
+          
+          // Role settings
+          document.getElementById('admin-role').value = settings.adminRoleId || '';
+          document.getElementById('mod-role').value = settings.modRoleId || '';
+          document.getElementById('dj-role').value = settings.djRoleId || '';
+          
+          // Form submissions
+          document.getElementById('bot-settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const botSettings = {
+              prefix: document.getElementById('bot-prefix').value,
+              slashCommands: document.getElementById('toggle-slash-commands').checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/bot`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(botSettings)
+              });
+              
+              alert('Bot settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save bot settings:', error);
+              alert('Failed to save bot settings. Please try again.');
+            }
+          });
+          
+          document.getElementById('welcome-settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const welcomeSettings = {
+              welcomeChannelId: document.getElementById('welcome-channel').value,
+              welcomeMessage: document.getElementById('welcome-message').value,
+              welcomeEnabled: document.getElementById('toggle-welcome').checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/welcome`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(welcomeSettings)
+              });
+              
+              alert('Welcome settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save welcome settings:', error);
+              alert('Failed to save welcome settings. Please try again.');
+            }
+          });
+          
+          document.getElementById('leave-settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const leaveSettings = {
+              leaveChannelId: document.getElementById('leave-channel').value,
+              leaveMessage: document.getElementById('leave-message').value,
+              leaveEnabled: document.getElementById('toggle-leave').checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/leave`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(leaveSettings)
+              });
+              
+              alert('Leave settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save leave settings:', error);
+              alert('Failed to save leave settings. Please try again.');
+            }
+          });
+          
+          document.getElementById('permissions-settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const permissionSettings = {
+              adminRoleId: document.getElementById('admin-role').value,
+              modRoleId: document.getElementById('mod-role').value,
+              djRoleId: document.getElementById('dj-role').value
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/permissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(permissionSettings)
+              });
+              
+              alert('Permission settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save permission settings:', error);
+              alert('Failed to save permission settings. Please try again.');
+            }
+          });
+        } catch (error) {
+          console.error('Failed to load guild settings:', error);
+        }
+      }
+      
+      // Load global bot stats
+      async function loadGlobalStats() {
+        try {
+          const stats = await fetchJSON('/api/admin/stats');
+          
+          document.getElementById('stat-servers').textContent = new Intl.NumberFormat().format(stats.servers);
+          document.getElementById('stat-users').textContent = new Intl.NumberFormat().format(stats.users);
+          document.getElementById('stat-latency').textContent = `${stats.latency} ms`;
+          document.getElementById('stat-commands').textContent = new Intl.NumberFormat().format(stats.commandsToday);
+          
+          // This would require chart.js or similar to be included
+          // For now, we'll just log it
+          console.log('Top commands:', stats.topCommands);
+        } catch (error) {
+          console.error('Failed to load global stats:', error);
+        }
+      }
+      
+      // Add a new modlog entry (for real-time updates)
+      function addModLogEntry(log) {
+        const modlogsBody = document.getElementById('modlogs-body');
+        
+        if (modlogsBody) {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${log.caseId}</td>
+            <td><span class="badge badge-${log.action.toLowerCase()}">${log.action}</span></td>
+            <td>${log.user}</td>
+            <td>${log.moderator}</td>
+            <td>${log.reason || '<em>No reason provided</em>'}</td>
+            <td>${new Date(log.timestamp).toLocaleString()}</td>
+          `;
+          
+          // Insert at the top
+          if (modlogsBody.firstChild) {
+            modlogsBody.insertBefore(row, modlogsBody.firstChild);
+          } else {
+            modlogsBody.appendChild(row);
+          }
+        }
+      }
+
+      async function logout() {
+        try {
+          await fetchJSON('/auth/logout', { method: 'POST' });
+        } catch (error) {
+          console.error('logout failed', error);
+        }
+        showLogin();
+      }
+
+      function showLogin() {
+        // hide inner panels, keep outer shell visible
+        if (emptyState) emptyState.style.display = 'none';
+        if (fullDashboard) fullDashboard.style.display = 'none';
+
+        actionBar.innerHTML = '<a class="button primary" href="/auth/login">Log in with Discord</a>';
+        statusArea.innerHTML = '';
+
+        if (socket) {
+          socket.close();
+          socket = null;
+        }
+      }
+
+      function renderSession(user) {
+        actionBar.innerHTML = `
+          <button class="ghost" id="refresh-btn">Refresh</button>
+          <button class="primary" id="logout-btn">Sign out</button>
+        `;
+        document.getElementById('refresh-btn').addEventListener('click', () => init());
+        document.getElementById('logout-btn').addEventListener('click', logout);
+
+        statusArea.innerHTML = `
+          <div class="status">
+            <div>
+              <strong>${user.username}</strong>
+              <span>signed in</span>
+            </div>
+            <div style="color: var(--muted);">
+              ${user.adminGuilds.length} guild${user.adminGuilds.length === 1 ? '' : 's'} with Manage Server
+            </div>
+          </div>
+        `;
+      }
+
+      async function init() {
+        try {
+          const session = await fetchJSON('/auth/session');
+          if (!session.authenticated) {
+            showLogin();
+            return;
+          }
+
+          renderSession(session.user);
+
+          if (!session.user.adminGuilds.length) {
+            // no guilds → show empty state
+            if (emptyState) emptyState.style.display = 'block';
+            if (fullDashboard) fullDashboard.style.display = 'none';
+            return;
+          }
+
+          // authenticated & has guilds → show full dashboard
+          if (emptyState) emptyState.style.display = 'none';
+          if (fullDashboard) fullDashboard.style.display = 'block';
+
+          loadServerList();
+          loadGlobalStats();
+          initWebSocket();
+        } catch (error) {
+          console.error('dashboard init failed', error);
+          showLogin();
+          statusArea.innerHTML = '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Unable to connect to dashboard API. Check console for details.</div>';
+        }
+      }
+
+      // Add missing updateStats function
+      function updateStats(data) {
+        if (!data) return;
+        
+        // Update server count
+        if (data.servers) {
+          document.getElementById('stat-servers').textContent = 
+            new Intl.NumberFormat().format(data.servers);
+        }
+        
+        // Update user count
+        if (data.users) {
+          document.getElementById('stat-users').textContent = 
+            new Intl.NumberFormat().format(data.users);
+        }
+        
+        // Update latency
+        if (data.latency) {
+          document.getElementById('stat-latency').textContent = 
+            `${data.latency} ms`;
+        }
+        
+        // Update commands today
+        if (data.commandsToday) {
+          document.getElementById('stat-commands').textContent = 
+            new Intl.NumberFormat().format(data.commandsToday);
+        }
+      }
+      // Start the application
+      init();
+    </script>
+  </body>
+</html>
