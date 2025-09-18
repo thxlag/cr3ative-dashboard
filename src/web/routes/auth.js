@@ -10,10 +10,26 @@ import { DASHBOARD_GUILD_ID, DASHBOARD_GUILD_NAME } from '../utils/config.js';
 
 const router = Router();
 
+function sanitizeState(input) {
+  if (typeof input !== 'string' || !input.trim()) {
+    return '/';
+  }
+  let value = input;
+  try {
+    value = decodeURIComponent(input);
+  } catch {
+    value = input;
+  }
+  if (!value.startsWith('/')) {
+    value = `/${value}`;
+  }
+  return value;
+}
+
 router.get('/auth/login', (req, res) => {
   try {
-    const state = typeof req.query.state === 'string' ? req.query.state : 'dashboard';
-    const url = buildAuthUrl(state);
+    const state = sanitizeState(req.query.state);
+    const url = buildAuthUrl(encodeURIComponent(state));
     res.redirect(url);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -36,7 +52,9 @@ router.get('/auth/callback', async (req, res) => {
     const guilds = await fetchDiscordGuilds(token.access_token);
     const adminGuilds = filterAdminGuilds(guilds);
     const allowedGuild = adminGuilds.find((g) => g.id === DASHBOARD_GUILD_ID);
-    const adminList = allowedGuild ? [{ id: allowedGuild.id, name: allowedGuild.name }] : [{ id: DASHBOARD_GUILD_ID, name: DASHBOARD_GUILD_NAME }];
+    const adminList = allowedGuild
+      ? [{ id: allowedGuild.id, name: allowedGuild.name }]
+      : [{ id: DASHBOARD_GUILD_ID, name: DASHBOARD_GUILD_NAME }];
 
     req.session.user = {
       id: user.id,
@@ -53,7 +71,8 @@ router.get('/auth/callback', async (req, res) => {
       tokenType: token.token_type,
     };
 
-    res.send('Login successful. You can close this window.');
+    const redirectTarget = sanitizeState(req.query.state);
+    res.redirect(redirectTarget);
   } catch (error) {
     res.status(500).send(`OAuth callback failed: ${error.message}`);
   }
@@ -76,5 +95,3 @@ router.get('/auth/session', (req, res) => {
 });
 
 export default router;
-
-
