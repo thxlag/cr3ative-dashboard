@@ -85,6 +85,21 @@ function getAnalyticsSummary(guildId = null) {
         const leaveCount = memberEvents.find(e => e.event_type === 'leave')?.count || 0;
         const netChange = joinCount - leaveCount;
 
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const messageStats = db.prepare(`
+            SELECT
+              user_id      AS userId,
+              COUNT(*)     AS messages,
+              SUM(sentiment) AS sentimentSum,
+              SUM(is_reply) AS replies,
+              SUM(word_count) AS words
+            FROM analytics_message_activity
+            WHERE guild_id = ? AND created_at >= ?
+            GROUP BY user_id
+            ORDER BY messages DESC
+            LIMIT 15
+          `).all(guildId, sevenDaysAgo);
+
         return {
             topCommands,
             topUsers,
@@ -93,11 +108,12 @@ function getAnalyticsSummary(guildId = null) {
                 leaveCount,
                 netChange,
                 memberGrowth: netChange
-            }
+            },
+            messageStats
         };
     } catch (error) {
         console.error('Error in getAnalyticsSummary:', error);
-        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 } };
+        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 }, messageStats: [] };
     }
 }
 
@@ -274,7 +290,25 @@ router.post('/api/admin/guilds/:guildId/console', ensureManageGuild, async (req,
 // --- WebSocket Support ---
 
 export async function getLiveStatsSnapshot() {
-  return computeGlobalStats();
+  try {
+    const analyticsData = await getAnalyticsData();
+
+    return {
+      servers: client.guilds.cache.size || 0,
+      users: client.guilds.cache.reduce((sum, g) => sum + (g.memberCount || 0), 0),
+      latency: client.ws.ping || 0,
+      commandsToday: analyticsData.topCommands.reduce((sum, c) => sum + (c.count || 0), 0),
+      topCommands: analyticsData.topCommands,
+
+      // prevent front-end chart code from breaking
+      memberGrowth: [],       
+      messageActivity: [],   
+      roleDistribution: []   
+    };
+  } catch (err) {
+    console.error('getLiveStatsSnapshot error:', err);
+    return null;
+  }
 }
 
 export default router;
