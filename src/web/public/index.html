@@ -980,14 +980,21 @@
       const panels = document.querySelectorAll('.panel');
       let socket = null;
       let currentGuildId = null;  // track selected guild
+      let reconnectAttempts = 0;  // track WebSocket reconnection attempts
 
       async function fetchJSON(url, options) {
-        const res = await fetch(url, options);
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(`HTTP error! status: ${res.status}, body: ${errorText}`);
+        try {
+          const res = await fetch(url, options);
+          if (!res.ok) {
+            const errorText = await res.text();
+            console.error(`HTTP error! status: ${res.status}, body: ${errorText}`);
+            throw new Error(`HTTP error! status: ${res.status}, body: ${errorText}`);
+          }
+          return res.json();
+        } catch (error) {
+          console.error(`API request failed for ${url}:`, error);
+          throw error;
         }
-        return res.json();
       }
 
       // Initialize WebSocket connection
@@ -996,61 +1003,84 @@
           socket.close();
         }
         
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-        
-        socket = new WebSocket(wsUrl);
-        
-        socket.onopen = function() {
-          console.log('WebSocket connected');
-          updateConnectionStatus(true);
-          sendHeartbeat(); // Start sending heartbeats
-        };
-        
-        socket.onclose = function() {
-          console.log('WebSocket disconnected');
-          updateConnectionStatus(false);
+        try {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${protocol}//${window.location.host}/ws`;
           
-          // Try to reconnect after 5 seconds
-          setTimeout(initWebSocket, 5000);
-        };
-        
-        socket.onmessage = function(event) {
-          const data = JSON.parse(event.data);
+          console.log(`Connecting to WebSocket at ${wsUrl}`);
+          socket = new WebSocket(wsUrl);
           
-          switch (data.type) {
-            case 'stats':
-              updateStats(data.payload);
-              break;
-            case 'modlog':
-              addModLogEntry(data.payload);
-              break;
-            case 'botStatus':
-              updateConnectionStatus(data.payload.online);
-              break;
-          }
-        };
+          socket.onopen = function() {
+            console.log('WebSocket connected');
+            updateConnectionStatus(true);
+            reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+            sendHeartbeat(); // Start sending heartbeats
+          };
+          
+          socket.onclose = function(event) {
+            console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+            updateConnectionStatus(false);
+            
+            // Exponential backoff for reconnection (max 30 seconds)
+            const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            console.log(`Attempting to reconnect in ${delay/1000} seconds (attempt ${reconnectAttempts})`);
+            setTimeout(initWebSocket, delay);
+          };
+          
+          socket.onmessage = function(event) {
+            try {
+              const data = JSON.parse(event.data);
+              
+              switch (data.type) {
+                case 'stats':
+                  updateStats(data.payload);
+                  break;
+                case 'modlog':
+                  addModLogEntry(data.payload);
+                  break;
+                case 'botStatus':
+                  updateConnectionStatus(data.payload.online);
+                  break;
+                default:
+                  console.log('Received WebSocket message:', data);
+              }
+            } catch (error) {
+              console.error('Error processing WebSocket message:', error, event.data);
+            }
+          };
 
-        socket.onerror = function(error) {
-          console.error('WebSocket error:', error);
-        };
+          socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+          };
+        } catch (error) {
+          console.error('Failed to initialize WebSocket:', error);
+          // Still try to reconnect
+          setTimeout(initWebSocket, 5000);
+        }
       }
 
       // Heartbeat mechanism
       function sendHeartbeat() {
         if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'heartbeat' }));
+          try {
+            socket.send(JSON.stringify({ type: 'heartbeat' }));
+          } catch (error) {
+            console.error('Error sending heartbeat:', error);
+          }
         }
         setTimeout(sendHeartbeat, 30000); // Send heartbeat every 30 seconds
       }
       
       function updateConnectionStatus(online) {
-        if (online) {
-          connectionIndicator.className = 'status-indicator status-online';
-          connectionText.textContent = 'Bot online';
-        } else {
-          connectionIndicator.className = 'status-indicator status-offline';
-          connectionText.textContent = 'Bot offline';
+        if (connectionIndicator && connectionText) {
+          if (online) {
+            connectionIndicator.className = 'status-indicator status-online';
+            connectionText.textContent = 'Bot online';
+          } else {
+            connectionIndicator.className = 'status-indicator status-offline';
+            connectionText.textContent = 'Bot offline';
+          }
         }
       }
       
@@ -1099,7 +1129,9 @@
             serverSelect.value = guilds[0].id;
             serverSelect.disabled = true;
             await loadGuildData(guilds[0].id);
-            connectionText.textContent = guilds[0].name;
+            if (connectionText) {
+              connectionText.textContent = guilds[0].name;
+            }
           }
 
           if (!serverSelect.hasAttribute('data-listener')) {
@@ -1118,6 +1150,7 @@
           }
         } catch (error) {
           console.error('Failed to load server list:', error);
+          statusArea.innerHTML += '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load server list. Check console for details.</div>';
         }
       }
       
@@ -1127,13 +1160,16 @@
           currentGuildId = guildId;
           const guildData = await fetchJSON(`/api/admin/guilds/${guildId}`);
           
-          // Update stats
-          document.getElementById('stat-users').textContent = new Intl.NumberFormat().format(guildData.memberCount);
+          // Update stats - with null checking
+          const memberCountElement = document.getElementById('stat-users');
+          if (memberCountElement && guildData && guildData.memberCount !== undefined) {
+            memberCountElement.textContent = new Intl.NumberFormat().format(guildData.memberCount);
+          }
           
-          // Update channels and roles dropdowns
-          updateChannelsDropdown(guildData.channels);
-          updateRolesDropdown(guildData.roles);
-          updateConsoleDropdown(guildData.channels);        // populate console channels
+          // Update channels and roles dropdowns - with null checking
+          if (guildData.channels) updateChannelsDropdown(guildData.channels);
+          if (guildData.roles) updateRolesDropdown(guildData.roles);
+          if (guildData.channels) updateConsoleDropdown(guildData.channels);
           
           // Load command settings
           loadCommandSettings(guildId);
@@ -1145,58 +1181,92 @@
           loadGuildSettings(guildId);
         } catch (error) {
           console.error('Failed to load guild data:', error);
+          statusArea.innerHTML += `<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load data for guild ${guildId}. Check console for details.</div>`;
         }
       }
       
       // Update channels dropdown
       function updateChannelsDropdown(channels) {
-        const welcomeChannel = document.getElementById('welcome-channel');
-        const leaveChannel = document.getElementById('leave-channel');
-        
-        welcomeChannel.innerHTML = '<option value="">Select channel...</option>';
-        leaveChannel.innerHTML = '<option value="">Select channel...</option>';
-        
-        channels.forEach(channel => {
-          if (channel.type === 'GUILD_TEXT') {
-            const option1 = document.createElement('option');
-            option1.value = channel.id;
-            option1.textContent = `#${channel.name}`;
-            welcomeChannel.appendChild(option1);
-            
-            const option2 = document.createElement('option');
-            option2.value = channel.id;
-            option2.textContent = `#${channel.name}`;
-            leaveChannel.appendChild(option2);
-          }
-        });
+        try {
+          const welcomeChannel = document.getElementById('welcome-channel');
+          const leaveChannel = document.getElementById('leave-channel');
+          
+          if (!welcomeChannel || !leaveChannel) return;
+          
+          welcomeChannel.innerHTML = '<option value="">Select channel...</option>';
+          leaveChannel.innerHTML = '<option value="">Select channel...</option>';
+          
+          channels.forEach(channel => {
+            if (channel.type === 'GUILD_TEXT' || channel.type === 0) { // 0 is GUILD_TEXT in newer Discord API
+              const option1 = document.createElement('option');
+              option1.value = channel.id;
+              option1.textContent = `#${channel.name}`;
+              welcomeChannel.appendChild(option1);
+              
+              const option2 = document.createElement('option');
+              option2.value = channel.id;
+              option2.textContent = `#${channel.name}`;
+              leaveChannel.appendChild(option2);
+            }
+          });
+        } catch (error) {
+          console.error('Failed to update channels dropdown:', error);
+        }
       }
       
       // Update roles dropdown
       function updateRolesDropdown(roles) {
-        const adminRole = document.getElementById('admin-role');
-        const modRole = document.getElementById('mod-role');
-        const djRole = document.getElementById('dj-role');
-        
-        adminRole.innerHTML = '<option value="">Select role...</option>';
-        modRole.innerHTML = '<option value="">Select role...</option>';
-        djRole.innerHTML = '<option value="">Select role...</option>';
-        
-        roles.forEach(role => {
-          const option1 = document.createElement('option');
-          option1.value = role.id;
-          option1.textContent = role.name;
-          adminRole.appendChild(option1);
+        try {
+          const adminRole = document.getElementById('admin-role');
+          const modRole = document.getElementById('mod-role');
+          const djRole = document.getElementById('dj-role');
           
-          const option2 = document.createElement('option');
-          option2.value = role.id;
-          option2.textContent = role.name;
-          modRole.appendChild(option2);
+          if (!adminRole || !modRole || !djRole) return;
           
-          const option3 = document.createElement('option');
-          option3.value = role.id;
-          option3.textContent = role.name;
-          djRole.appendChild(option3);
-        });
+          adminRole.innerHTML = '<option value="">Select role...</option>';
+          modRole.innerHTML = '<option value="">Select role...</option>';
+          djRole.innerHTML = '<option value="">Select role...</option>';
+          
+          roles.forEach(role => {
+            const option1 = document.createElement('option');
+            option1.value = role.id;
+            option1.textContent = role.name;
+            adminRole.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = role.id;
+            option2.textContent = role.name;
+            modRole.appendChild(option2);
+            
+            const option3 = document.createElement('option');
+            option3.value = role.id;
+            option3.textContent = role.name;
+            djRole.appendChild(option3);
+          });
+        } catch (error) {
+          console.error('Failed to update roles dropdown:', error);
+        }
+      }
+      
+      // Update console channel dropdown - new function
+      function updateConsoleDropdown(channels) {
+        try {
+          const consoleChannel = document.getElementById('console-channel');
+          if (!consoleChannel) return;
+          
+          consoleChannel.innerHTML = '<option value="">Select channel...</option>';
+          
+          channels.forEach(channel => {
+            if (channel.type === 'GUILD_TEXT' || channel.type === 0) {
+              const option = document.createElement('option');
+              option.value = channel.id;
+              option.textContent = `#${channel.name}`;
+              consoleChannel.appendChild(option);
+            }
+          });
+        } catch (error) {
+          console.error('Failed to update console dropdown:', error);
+        }
       }
       
       // Load command settings
@@ -1205,13 +1275,20 @@
           const commands = await fetchJSON(`/api/admin/guilds/${guildId}/commands`);
           const commandsList = document.getElementById('commands-list');
           
+          if (!commandsList) return;
+          
           commandsList.innerHTML = '';
+          
+          if (!commands || !Array.isArray(commands) || commands.length === 0) {
+            commandsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">No commands available or commands data could not be loaded.</div>';
+            return;
+          }
           
           commands.forEach(command => {
             const commandItem = document.createElement('div');
             commandItem.className = 'command-item';
             commandItem.innerHTML = `
-              <div class="command-name">${command.name}</div>
+              <div class="command-name">${command.name || 'Unknown'}</div>
               <label class="toggle-switch">
                 <input type="checkbox" data-command="${command.id}" ${command.enabled ? 'checked' : ''}>
                 <span class="toggle-slider"></span>
@@ -1236,31 +1313,38 @@
           });
           
           // Save button
-          document.getElementById('btn-save-commands').addEventListener('click', async () => {
-            const updatedCommands = [];
-            
-            document.querySelectorAll('[data-command]').forEach(checkbox => {
-              updatedCommands.push({
-                id: checkbox.getAttribute('data-command'),
-                enabled: checkbox.checked
-              });
-            });
-            
-            try {
-              await fetchJSON(`/api/admin/guilds/${guildId}/commands`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ commands: updatedCommands })
+          const saveBtn = document.getElementById('btn-save-commands');
+          if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+              const updatedCommands = [];
+              
+              document.querySelectorAll('[data-command]').forEach(checkbox => {
+                updatedCommands.push({
+                  id: checkbox.getAttribute('data-command'),
+                  enabled: checkbox.checked
+                });
               });
               
-              alert('Command settings saved successfully!');
-            } catch (error) {
-              console.error('Failed to save command settings:', error);
-              alert('Failed to save command settings. Please try again.');
-            }
-          });
+              try {
+                await fetchJSON(`/api/admin/guilds/${guildId}/commands`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ commands: updatedCommands })
+                });
+                
+                alert('Command settings saved successfully!');
+              } catch (error) {
+                console.error('Failed to save command settings:', error);
+                alert('Failed to save command settings. Please try again.');
+              }
+            });
+          }
         } catch (error) {
           console.error('Failed to load command settings:', error);
+          const commandsList = document.getElementById('commands-list');
+          if (commandsList) {
+            commandsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">Failed to load commands. Check console for details.</div>';
+          }
         }
       }
       
@@ -1270,17 +1354,24 @@
           const modlogs = await fetchJSON(`/api/admin/guilds/${guildId}/modlogs`);
           const modlogsBody = document.getElementById('modlogs-body');
           
+          if (!modlogsBody) return;
+          
           modlogsBody.innerHTML = '';
+          
+          if (!modlogs || !Array.isArray(modlogs) || modlogs.length === 0) {
+            modlogsBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--muted);">No moderation logs available.</td></tr>';
+            return;
+          }
           
           modlogs.forEach(log => {
             const row = document.createElement('tr');
             row.innerHTML = `
-              <td>${log.caseId}</td>
-              <td><span class="badge badge-${log.action.toLowerCase()}">${log.action}</span></td>
-              <td>${log.user}</td>
-              <td>${log.moderator}</td>
+              <td>${log.caseId || 'N/A'}</td>
+              <td><span class="badge badge-${(log.action || 'unknown').toLowerCase()}">${log.action || 'Unknown'}</span></td>
+              <td>${log.user || 'Unknown'}</td>
+              <td>${log.moderator || 'System'}</td>
               <td>${log.reason || '<em>No reason provided</em>'}</td>
-              <td>${new Date(log.timestamp).toLocaleString()}</td>
+              <td>${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Unknown'}</td>
             `;
             modlogsBody.appendChild(row);
           });
@@ -1289,11 +1380,15 @@
           const search = document.getElementById('modlogs-search');
           const filter = document.getElementById('modlogs-filter');
           
+          if (!search || !filter) return;
+          
           function filterModlogs() {
             const searchTerm = search.value.toLowerCase();
             const filterValue = filter.value;
             
             Array.from(modlogsBody.children).forEach(row => {
+              if (row.children.length < 6) return; // Skip invalid rows
+              
               const action = row.children[1].textContent.toLowerCase();
               const user = row.children[2].textContent.toLowerCase();
               const moderator = row.children[3].textContent.toLowerCase();
@@ -1314,6 +1409,10 @@
           filter.addEventListener('change', filterModlogs);
         } catch (error) {
           console.error('Failed to load moderation logs:', error);
+          const modlogsBody = document.getElementById('modlogs-body');
+          if (modlogsBody) {
+            modlogsBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--muted);">Failed to load moderation logs. Check console for details.</td></tr>';
+          }
         }
       }
       
@@ -1322,32 +1421,63 @@
         try {
           const settings = await fetchJSON(`/api/admin/guilds/${guildId}/settings`);
           
-          // Bot settings
-          document.getElementById('bot-prefix').value = settings.prefix || '!';
-          document.getElementById('toggle-slash-commands').checked = settings.slashCommands !== false;
+          // Only set values if elements and settings exist
+          const botPrefix = document.getElementById('bot-prefix');
+          if (botPrefix) botPrefix.value = settings?.prefix || '!';
           
-          // Welcome settings
-          document.getElementById('welcome-channel').value = settings.welcomeChannelId || '';
-          document.getElementById('welcome-message').value = settings.welcomeMessage || '';
-          document.getElementById('toggle-welcome').checked = settings.welcomeEnabled !== false;
+          const toggleSlashCommands = document.getElementById('toggle-slash-commands');
+          if (toggleSlashCommands) toggleSlashCommands.checked = settings?.slashCommands !== false;
           
-          // Leave settings
-          document.getElementById('leave-channel').value = settings.leaveChannelId || '';
-          document.getElementById('leave-message').value = settings.leaveMessage || '';
-          document.getElementById('toggle-leave').checked = settings.leaveEnabled !== false;
+          const welcomeChannel = document.getElementById('welcome-channel');
+          if (welcomeChannel) welcomeChannel.value = settings?.welcomeChannelId || '';
           
-          // Role settings
-          document.getElementById('admin-role').value = settings.adminRoleId || '';
-          document.getElementById('mod-role').value = settings.modRoleId || '';
-          document.getElementById('dj-role').value = settings.djRoleId || '';
+          const welcomeMessage = document.getElementById('welcome-message');
+          if (welcomeMessage) welcomeMessage.value = settings?.welcomeMessage || '';
           
-          // Form submissions
-          document.getElementById('bot-settings-form').addEventListener('submit', async (e) => {
+          const toggleWelcome = document.getElementById('toggle-welcome');
+          if (toggleWelcome) toggleWelcome.checked = settings?.welcomeEnabled !== false;
+          
+          const leaveChannel = document.getElementById('leave-channel');
+          if (leaveChannel) leaveChannel.value = settings?.leaveChannelId || '';
+          
+          const leaveMessage = document.getElementById('leave-message');
+          if (leaveMessage) leaveMessage.value = settings?.leaveMessage || '';
+          
+          const toggleLeave = document.getElementById('toggle-leave');
+          if (toggleLeave) toggleLeave.checked = settings?.leaveEnabled !== false;
+          
+          const adminRole = document.getElementById('admin-role');
+          if (adminRole) adminRole.value = settings?.adminRoleId || '';
+          
+          const modRole = document.getElementById('mod-role');
+          if (modRole) modRole.value = settings?.modRoleId || '';
+          
+          const djRole = document.getElementById('dj-role');
+          if (djRole) djRole.value = settings?.djRoleId || '';
+          
+          // Setup form submission handlers
+          setupFormSubmitHandlers(guildId);
+        } catch (error) {
+          console.error('Failed to load guild settings:', error);
+        }
+      }
+      
+      // Setup form submission handlers - separate function for cleaner code
+      function setupFormSubmitHandlers(guildId) {
+        // Bot settings form
+        const botSettingsForm = document.getElementById('bot-settings-form');
+        if (botSettingsForm) {
+          botSettingsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const botPrefix = document.getElementById('bot-prefix');
+            const toggleSlashCommands = document.getElementById('toggle-slash-commands');
+            
+            if (!botPrefix || !toggleSlashCommands) return;
+            
             const botSettings = {
-              prefix: document.getElementById('bot-prefix').value,
-              slashCommands: document.getElementById('toggle-slash-commands').checked
+              prefix: botPrefix.value,
+              slashCommands: toggleSlashCommands.checked
             };
             
             try {
@@ -1363,14 +1493,24 @@
               alert('Failed to save bot settings. Please try again.');
             }
           });
-          
-          document.getElementById('welcome-settings-form').addEventListener('submit', async (e) => {
+        }
+        
+        // Welcome settings form
+        const welcomeSettingsForm = document.getElementById('welcome-settings-form');
+        if (welcomeSettingsForm) {
+          welcomeSettingsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const welcomeChannel = document.getElementById('welcome-channel');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const toggleWelcome = document.getElementById('toggle-welcome');
+            
+            if (!welcomeChannel || !welcomeMessage || !toggleWelcome) return;
+            
             const welcomeSettings = {
-              welcomeChannelId: document.getElementById('welcome-channel').value,
-              welcomeMessage: document.getElementById('welcome-message').value,
-              welcomeEnabled: document.getElementById('toggle-welcome').checked
+              welcomeChannelId: welcomeChannel.value,
+              welcomeMessage: welcomeMessage.value,
+              welcomeEnabled: toggleWelcome.checked
             };
             
             try {
@@ -1386,14 +1526,24 @@
               alert('Failed to save welcome settings. Please try again.');
             }
           });
-          
-          document.getElementById('leave-settings-form').addEventListener('submit', async (e) => {
+        }
+        
+        // Leave settings form
+        const leaveSettingsForm = document.getElementById('leave-settings-form');
+        if (leaveSettingsForm) {
+          leaveSettingsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const leaveChannel = document.getElementById('leave-channel');
+            const leaveMessage = document.getElementById('leave-message');
+            const toggleLeave = document.getElementById('toggle-leave');
+            
+            if (!leaveChannel || !leaveMessage || !toggleLeave) return;
+            
             const leaveSettings = {
-              leaveChannelId: document.getElementById('leave-channel').value,
-              leaveMessage: document.getElementById('leave-message').value,
-              leaveEnabled: document.getElementById('toggle-leave').checked
+              leaveChannelId: leaveChannel.value,
+              leaveMessage: leaveMessage.value,
+              leaveEnabled: toggleLeave.checked
             };
             
             try {
@@ -1409,14 +1559,24 @@
               alert('Failed to save leave settings. Please try again.');
             }
           });
-          
-          document.getElementById('permissions-settings-form').addEventListener('submit', async (e) => {
+        }
+        
+        // Permissions settings form
+        const permissionsSettingsForm = document.getElementById('permissions-settings-form');
+        if (permissionsSettingsForm) {
+          permissionsSettingsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const adminRole = document.getElementById('admin-role');
+            const modRole = document.getElementById('mod-role');
+            const djRole = document.getElementById('dj-role');
+            
+            if (!adminRole || !modRole || !djRole) return;
+            
             const permissionSettings = {
-              adminRoleId: document.getElementById('admin-role').value,
-              modRoleId: document.getElementById('mod-role').value,
-              djRoleId: document.getElementById('dj-role').value
+              adminRoleId: adminRole.value,
+              modRoleId: modRole.value,
+              djRoleId: djRole.value
             };
             
             try {
@@ -1432,8 +1592,6 @@
               alert('Failed to save permission settings. Please try again.');
             }
           });
-        } catch (error) {
-          console.error('Failed to load guild settings:', error);
         }
       }
       
@@ -1442,32 +1600,78 @@
         try {
           const stats = await fetchJSON('/api/admin/stats');
           
-          document.getElementById('stat-servers').textContent = new Intl.NumberFormat().format(stats.servers);
-          document.getElementById('stat-users').textContent = new Intl.NumberFormat().format(stats.users);
-          document.getElementById('stat-latency').textContent = `${stats.latency} ms`;
-          document.getElementById('stat-commands').textContent = new Intl.NumberFormat().format(stats.commandsToday);
+          // Safely update stats with null checking
+          const updateElement = (id, value, formatter = null) => {
+            const element = document.getElementById(id);
+            if (element && value !== undefined) {
+              element.textContent = formatter ? formatter(value) : value;
+            }
+          };
           
-          // This would require chart.js or similar to be included
-          // For now, we'll just log it
-          console.log('Top commands:', stats.topCommands);
+          const numberFormatter = new Intl.NumberFormat().format;
+          
+          updateElement('stat-servers', stats?.servers, numberFormatter);
+          updateElement('stat-users', stats?.users, numberFormatter);
+          updateElement('stat-latency', stats?.latency, (val) => `${val} ms`);
+          updateElement('stat-commands', stats?.commandsToday, numberFormatter);
+          
+          // Handle memberGrowth chart - this is likely where the error occurs
+          handleCharts(stats);
+          
         } catch (error) {
           console.error('Failed to load global stats:', error);
+          // Show error message to user
+          statusArea.innerHTML += '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load global stats. Check console for details.</div>';
+        }
+      }
+      
+      // Safely handle chart data initialization
+      function handleCharts(stats) {
+        try {
+          // For now, we'll just add placeholder content to chart containers
+          // since we don't have Chart.js integrated
+          const chartContainers = [
+            'chart-top-commands',
+            'chart-member-growth',
+            'chart-message-activity',
+            'chart-role-distribution'
+          ];
+          
+          chartContainers.forEach(containerId => {
+            const container = document.getElementById(containerId);
+            if (container) {
+              container.innerHTML = '<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted);">Chart data loading... <br>(or Chart.js integration missing)</div>';
+            }
+          });
+          
+          // Log chart data to console for debugging
+          console.log('Chart data available:', { 
+            memberGrowth: stats?.memberStats?.memberGrowth || 'N/A',
+            messageActivity: stats?.messageStats?.activity || 'N/A',
+            topCommands: stats?.topCommands || 'N/A',
+            roleDistribution: stats?.roleStats?.distribution || 'N/A'
+          });
+          
+        } catch (error) {
+          console.error('Failed to initialize charts:', error);
         }
       }
       
       // Add a new modlog entry (for real-time updates)
       function addModLogEntry(log) {
+        if (!log) return;
+        
         const modlogsBody = document.getElementById('modlogs-body');
         
         if (modlogsBody) {
           const row = document.createElement('tr');
           row.innerHTML = `
-            <td>${log.caseId}</td>
-            <td><span class="badge badge-${log.action.toLowerCase()}">${log.action}</span></td>
-            <td>${log.user}</td>
-            <td>${log.moderator}</td>
+            <td>${log.caseId || 'N/A'}</td>
+            <td><span class="badge badge-${(log.action || 'unknown').toLowerCase()}">${log.action || 'Unknown'}</span></td>
+            <td>${log.user || 'Unknown'}</td>
+            <td>${log.moderator || 'System'}</td>
             <td>${log.reason || '<em>No reason provided</em>'}</td>
-            <td>${new Date(log.timestamp).toLocaleString()}</td>
+            <td>${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Unknown'}</td>
           `;
           
           // Insert at the top
@@ -1525,22 +1729,27 @@
 
       async function init() {
         try {
+          console.log('Dashboard initializing...');
           const session = await fetchJSON('/auth/session');
           if (!session.authenticated) {
+            console.log('User not authenticated, showing login');
             showLogin();
             return;
           }
 
+          console.log('User authenticated:', session.user.username);
           renderSession(session.user);
 
           if (!session.user.adminGuilds.length) {
             // no guilds → show empty state
+            console.log('No admin guilds found, showing empty state');
             if (emptyState) emptyState.style.display = 'block';
             if (fullDashboard) fullDashboard.style.display = 'none';
             return;
           }
 
           // authenticated & has guilds → show full dashboard
+          console.log('Admin guilds found, showing dashboard');
           if (emptyState) emptyState.style.display = 'none';
           if (fullDashboard) fullDashboard.style.display = 'block';
 
@@ -1554,57 +1763,118 @@
         }
       }
 
-      // Add missing updateStats function
+      // Add missing updateStats function with defensive coding
       function updateStats(data) {
-        if (!data) return;
-        
-        // Update server count
-        if (data.servers) {
-          document.getElementById('stat-servers').textContent = 
-            new Intl.NumberFormat().format(data.servers);
+        if (!data) {
+          console.warn('Received empty stats data');
+          return;
         }
         
-        // Update user count
-        if (data.users) {
-          document.getElementById('stat-users').textContent = 
-            new Intl.NumberFormat().format(data.users);
-        }
-        
-        // Update latency
-        if (data.latency) {
-          document.getElementById('stat-latency').textContent = 
-            `${data.latency} ms`;
-        }
-        
-        // Update commands today
-        if (data.commandsToday) {
-          document.getElementById('stat-commands').textContent = 
-            new Intl.NumberFormat().format(data.commandsToday);
+        try {
+          // Update server count
+          const serversElement = document.getElementById('stat-servers');
+          if (serversElement && data.servers !== undefined) {
+            serversElement.textContent = new Intl.NumberFormat().format(data.servers);
+          }
+          
+          // Update user count
+          const usersElement = document.getElementById('stat-users');
+          if (usersElement && data.users !== undefined) {
+            usersElement.textContent = new Intl.NumberFormat().format(data.users);
+          }
+          
+          // Update latency
+          const latencyElement = document.getElementById('stat-latency');
+          if (latencyElement && data.latency !== undefined) {
+            latencyElement.textContent = `${data.latency} ms`;
+          }
+          
+          // Update commands today
+          const commandsElement = document.getElementById('stat-commands');
+          if (commandsElement && data.commandsToday !== undefined) {
+            commandsElement.textContent = new Intl.NumberFormat().format(data.commandsToday);
+          }
+          
+          // Update charts if needed
+          handleCharts(data);
+        } catch (error) {
+          console.error('Error updating stats:', error);
         }
       }
+      
+      // Setup console message sending
+      const consoleSendBtn = document.getElementById('btn-console-send');
+      if (consoleSendBtn) {
+        consoleSendBtn.addEventListener('click', async () => {
+          const channelId = document.getElementById('console-channel')?.value;
+          const content = document.getElementById('console-input')?.value?.trim();
+          
+          if (!currentGuildId || !channelId || !content) {
+            return alert('Select a server, channel, and enter a message.');
+          }
+          
+          try {
+            await fetchJSON(`/api/admin/guilds/${currentGuildId}/console`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ channelId, content })
+            });
+            
+            alert('Message sent!');
+            const consoleInput = document.getElementById('console-input');
+            if (consoleInput) consoleInput.value = '';
+          } catch (err) {
+            console.error('Console send failed:', err);
+            alert('Failed to send message. Check console.');
+          }
+        });
+      }
+      
+      // Add event listeners for quick action buttons
+      const restartBtn = document.getElementById('btn-restart-bot');
+      if (restartBtn) {
+        restartBtn.addEventListener('click', async () => {
+          if (!confirm('Are you sure you want to restart the bot?')) return;
+          
+          try {
+            await fetchJSON('/api/admin/restart', { method: 'POST' });
+            alert('Bot restart initiated!');
+          } catch (err) {
+            console.error('Bot restart failed:', err);
+            alert('Failed to restart bot. Check console.');
+          }
+        });
+      }
+      
+      const syncCommandsBtn = document.getElementById('btn-sync-commands');
+      if (syncCommandsBtn) {
+        syncCommandsBtn.addEventListener('click', async () => {
+          try {
+            await fetchJSON('/api/admin/sync-commands', { method: 'POST' });
+            alert('Commands synchronized successfully!');
+          } catch (err) {
+            console.error('Command sync failed:', err);
+            alert('Failed to sync commands. Check console.');
+          }
+        });
+      }
+      
+      const clearCacheBtn = document.getElementById('btn-clear-cache');
+      if (clearCacheBtn) {
+        clearCacheBtn.addEventListener('click', async () => {
+          try {
+            await fetchJSON('/api/admin/clear-cache', { method: 'POST' });
+            alert('Cache cleared successfully!');
+          } catch (err) {
+            console.error('Cache clear failed:', err);
+            alert('Failed to clear cache. Check console.');
+          }
+        });
+      }
+      
       // Start the application
-      init();
-
-      // New: send console message
-      document.getElementById('btn-console-send').addEventListener('click', async () => {
-        const channelId = document.getElementById('console-channel').value;
-        const content = document.getElementById('console-input').value.trim();
-        if (!currentGuildId || !channelId || !content) {
-          return alert('Select a server, channel, and enter a message.');
-        }
-        try {
-          await fetchJSON(`/api/admin/guilds/${currentGuildId}/console`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelId, content })
-          });
-          alert('Message sent!');
-          document.getElementById('console-input').value = '';
-        } catch (err) {
-          console.error('Console send failed:', err);
-          alert('Failed to send message. Check console.');
-        }
-      });
+      console.log('Starting dashboard application...');
+      window.addEventListener('load', init);
     </script>
   </body>
 </html>
