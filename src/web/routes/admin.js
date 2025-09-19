@@ -1,4 +1,3 @@
-
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -78,7 +77,8 @@ function getAnalyticsSummary(guildId = null) {
 
     try {
         const topCommands = db.prepare(`SELECT command_name as name, COUNT(*) as count FROM analytics_command_usage ${where} GROUP BY command_name ORDER BY count DESC LIMIT 10`).all(...params);
-        const topUsers = db.prepare(`SELECT user_id as id, user_name as name, COUNT(*) as count FROM analytics_message_activity ${where} GROUP BY user_id, user_name ORDER BY count DESC LIMIT 10`).all(...params);
+        // Corrected Query: Removed user_name as it does not exist in the table.
+        const topUsers = db.prepare(`SELECT user_id as id, COUNT(*) as count FROM analytics_message_activity ${where} GROUP BY user_id ORDER BY count DESC LIMIT 10`).all(...params);
         const memberEvents = db.prepare(`SELECT event_type, COUNT(*) as count FROM analytics_member_events ${where} GROUP BY event_type`).all(...params);
 
         const joinCount = memberEvents.find(e => e.event_type === 'join')?.count || 0;
