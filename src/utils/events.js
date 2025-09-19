@@ -1,4 +1,3 @@
-// src/utils/events.js
 import { getDB } from '../lib/db.js';
 import { EmbedBuilder } from 'discord.js';
 import { incWallet } from '../lib/econ.js';
@@ -7,6 +6,45 @@ import { addXp } from './leveling.js';
 const timers = new Map(); // guildId -> timeout
 const activity = new Map(); // guildId -> Map<userId, lastTs>
 const autoState = new Map(); // guildId -> { lastStart: number, lastEnd: number }
+
+// --- Self-healing Table Creation ---
+function ensureTables() {
+    const db = getDB();
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS events_active (
+            guild_id   TEXT PRIMARY KEY,
+            event_name TEXT NOT NULL,
+            multiplier REAL NOT NULL DEFAULT 1.0,
+            started_by TEXT,
+            channel_id TEXT,
+            start_ts   INTEGER NOT NULL,
+            end_ts     INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS events_meta (
+            guild_id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            config_json TEXT
+        );
+        CREATE TABLE IF NOT EXISTS event_progress (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value INTEGER NOT NULL DEFAULT 0,
+            completed_ts INTEGER,
+            PRIMARY KEY (guild_id, user_id, metric)
+        );
+        CREATE TABLE IF NOT EXISTS event_results (
+            guild_id   TEXT NOT NULL,
+            event_name TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
+            score      INTEGER NOT NULL DEFAULT 1,
+            at_ts      INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, event_name, user_id, at_ts)
+        );
+    `);
+}
+
+ensureTables(); // Run on module load
 
 export function getActiveEvent(guildId) {
   const db = getDB();
@@ -36,12 +74,9 @@ export function getBurstConfig(guildId) {
 }
 
 export function startBurstEvent(guild, { durationMin, channelId, startedBy, goals, winners = 3, prizes = { coins: [1000, 600, 400], xp: [0, 0, 0] } }) {
-  // Reuse events_active for timing + announce channel
   const db = getDB();
   const { start_ts, end_ts } = startEvent(guild, { name: 'Quest Burst', multiplier: 1.0, durationMin, channelId, startedBy });
-  // Save config
   setBurstConfig(guild.id, 'quest_burst', { goals, winners, prizes, channel_id: channelId || null, start_ts, end_ts });
-  // Reset progress for this guild
   db.prepare('DELETE FROM event_progress WHERE guild_id = ?').run(guild.id);
   return { start_ts, end_ts };
 }
@@ -58,7 +93,6 @@ export function incBurstMetric(guildId, userId, metric, amount = 1) {
   const db = getDB();
   const cfg = getBurstConfig(guildId) || {};
   const goals = Array.isArray(cfg.goals) ? cfg.goals : [];
-  // Only count metrics that are in goals
   if (!goals.some(g => g.metric === metric)) return;
 
   db.prepare(`
@@ -67,7 +101,6 @@ export function incBurstMetric(guildId, userId, metric, amount = 1) {
     ON CONFLICT(guild_id, user_id, metric) DO UPDATE SET value = value + excluded.value
   `).run(guildId, userId, metric, Math.max(1, Math.floor(amount)));
 
-  // Check completion
   let allMet = true;
   for (const g of goals) {
     const row = db.prepare('SELECT value FROM event_progress WHERE guild_id = ? AND user_id = ? AND metric = ?').get(guildId, userId, g.metric) || { value: 0 };
@@ -75,7 +108,6 @@ export function incBurstMetric(guildId, userId, metric, amount = 1) {
   }
 
   if (allMet) {
-    // mark completion timestamp on a special metric key
     const key = '__done__';
     const existing = db.prepare('SELECT completed_ts FROM event_progress WHERE guild_id = ? AND user_id = ? AND metric = ?').get(guildId, userId, key);
     if (!existing?.completed_ts) {
@@ -118,10 +150,8 @@ export function endEvent(guild, { announce = true } = {}) {
   if (announce && row) {
     const meta = getBurstConfig(guild.id);
     if (meta && row.event_name === 'Quest Burst') {
-      // Compute winners
       const goals = Array.isArray(meta.goals) ? meta.goals : [];
       const winners = Math.max(1, Math.min(5, Number(meta.winners || 3)));
-      // Completed users by time
       const done = db.prepare(`
         SELECT user_id, completed_ts FROM event_progress
         WHERE guild_id = ? AND metric = '__done__' AND completed_ts IS NOT NULL
@@ -130,7 +160,6 @@ export function endEvent(guild, { announce = true } = {}) {
       `).all(guild.id, winners);
       const lines = [];
 
-      // Award coins/xp
       for (let i = 0; i < done.length; i++) {
         const uid = done[i].user_id;
         const coins = Number((meta.prizes?.coins || [])[i] || 0);
@@ -140,9 +169,7 @@ export function endEvent(guild, { announce = true } = {}) {
         lines.push(`**${i+1}.** <@${uid}> — prize: **${coins}** coins${xp?` + **${xp}** XP`:''}`);
       }
 
-      // If not enough completions, fallback to progress totals
       if (!lines.length) {
-        // Sum of progress ratios
         const users = db.prepare('SELECT DISTINCT user_id FROM event_progress WHERE guild_id = ? AND metric != "__done__"').all(guild.id);
         const scores = [];
         for (const u of users) {
@@ -167,10 +194,10 @@ export function endEvent(guild, { announce = true } = {}) {
       const ch = row.channel_id ? guild.channels.cache.get(row.channel_id) : null;
       const embed = new EmbedBuilder()
         .setTitle(`🏁 ${row.event_name} ended`)
-        .setDescription(lines.length ? lines.join('\n') : 'Thanks for playing!')
+        .setDescription(lines.length ? lines.join('
+') : 'Thanks for playing!')
         .setTimestamp(Date.now());
       if (ch?.isTextBased?.()) ch.send({ embeds: [embed] }).catch(()=>{});
-      // Clear meta
       db.prepare('DELETE FROM events_meta WHERE guild_id = ?').run(guild.id);
       db.prepare('DELETE FROM event_progress WHERE guild_id = ?').run(guild.id);
     } else {
@@ -197,13 +224,11 @@ export function recordEventScore(guildId, eventName, userId, score) {
 }
 
 export function ensureEventScheduler(client) {
-  // on boot, set timers for all active events
   const db = getDB();
   const now = Date.now();
   const rows = db.prepare(`SELECT * FROM events_active`).all();
   for (const row of rows) {
     if (row.end_ts <= now) {
-      // clean up expired
       db.prepare(`DELETE FROM events_active WHERE guild_id = ?`).run(row.guild_id);
       continue;
     }
@@ -216,7 +241,6 @@ function scheduleEndTimer(client, guildId) {
   const row = db.prepare(`SELECT * FROM events_active WHERE guild_id = ?`).get(guildId);
   if (!row) return;
   const ms = Math.max(0, row.end_ts - Date.now());
-  // clear existing
   const old = timers.get(guildId);
   if (old) clearTimeout(old);
   const t = setTimeout(async () => {
@@ -227,7 +251,6 @@ function scheduleEndTimer(client, guildId) {
   timers.set(guildId, t);
 }
 
-// ---- Activity tracking & auto event scheduler ----
 export function recordChatActivity(guildId, userId) {
   if (!guildId || !userId) return;
   let m = activity.get(guildId);
@@ -248,30 +271,25 @@ export function setupAutoEventScheduler(client) {
     try {
       const now = Date.now();
       for (const [guildId, users] of activity.entries()){
-        // prune old activity
         let activeCount = 0;
         for (const [uid, ts] of users.entries()){
           if (now - ts <= lookbackSec*1000) activeCount++; else users.delete(uid);
         }
-        // skip if not enough
         if (activeCount < minActive) continue;
-        // skip if event active
         const active = getActiveEvent(guildId);
         if (active) continue;
         const st = autoState.get(guildId) || { lastStart: 0, lastEnd: 0 };
         const sinceLast = (now - Math.max(st.lastEnd, st.lastStart)) / (60*1000);
         if (sinceLast < cooldownMin) continue;
 
-        // choose event type & duration
         const type = typeList[Math.floor(Math.random()*typeList.length)] || 'quest_burst';
         const duration = minutesList[Math.floor(Math.random()*minutesList.length)] || 30;
 
-        // fetch guild
         const guild = await client.guilds.fetch(guildId).catch(()=>null);
         if (!guild) continue;
         const announceId = process.env.EVENTS_ANNOUNCE_CHANNEL_ID || null;
         if (type === 'quest_burst'){
-          const presets = [['msgs',25],['works',2]]; // default goals
+          const presets = [['msgs',25],['works',2]];
           const goals = presets.map(([metric,target])=>({ metric, target }));
           startBurstEvent(guild, {
             durationMin: duration,
@@ -282,7 +300,7 @@ export function setupAutoEventScheduler(client) {
             prizes: { coins: [800, 500, 300], xp: [0, 0, 0] }
           });
         } else {
-          const mult = 1.2 + Math.random()*0.6; // 1.2–1.8
+          const mult = 1.2 + Math.random()*0.6;
           startEvent(guild, { name: 'XP Boost', multiplier: Number(mult.toFixed(2)), durationMin: duration, channelId: announceId, startedBy: 'auto' });
         }
         autoState.set(guildId, { lastStart: now, lastEnd: now });
