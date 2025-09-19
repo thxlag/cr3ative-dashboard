@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { client } from '../../../index.js';
+import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { getDB } from '../../lib/db.js';
 import { getEconomySummary } from '../../lib/econ.js'; // Assuming path
