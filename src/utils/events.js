@@ -195,8 +195,7 @@ export function endEvent(guild, { announce = true } = {}) {
       const ch = row.channel_id ? guild.channels.cache.get(row.channel_id) : null;
       const embed = new EmbedBuilder()
         .setTitle(`🏁 ${row.event_name} ended`)
-        .setDescription(lines.length ? lines.join('
-') : 'Thanks for playing!')
+        .setDescription(lines.length ? lines.join('\n') : 'Thanks for playing!')
         .setTimestamp(Date.now());
       if (ch?.isTextBased?.()) ch.send({ embeds: [embed] }).catch(()=>{});
       db.prepare('DELETE FROM events_meta WHERE guild_id = ?').run(guild.id);
