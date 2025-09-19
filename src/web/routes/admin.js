@@ -1,4 +1,3 @@
-
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -87,6 +86,7 @@ function getAnalyticsSummary(guildId = null) {
 
         const joinCount = memberEvents.find(e => e.event_type === 'join')?.count || 0;
         const leaveCount = memberEvents.find(e => e.event_type === 'leave')?.count || 0;
+        const netChange = joinCount - leaveCount;
 
         return {
             topCommands,
@@ -94,12 +94,13 @@ function getAnalyticsSummary(guildId = null) {
             memberStats: {
                 joinCount,
                 leaveCount,
-                netChange: joinCount - leaveCount
+                netChange,
+                memberGrowth: netChange // Added this field for the frontend
             }
         };
     } catch (error) {
         console.error('Error in getAnalyticsSummary:', error);
-        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0 } };
+        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 } };
     }
 }
 
