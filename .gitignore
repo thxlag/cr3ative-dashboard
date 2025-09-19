@@ -1,6 +1,6 @@
 # dependencies
 node_modules/
-modules/
+/modules/
 
 # build outputs
 src/web/app/dist/

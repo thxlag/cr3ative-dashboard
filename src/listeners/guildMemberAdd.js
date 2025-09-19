@@ -1,20 +1,23 @@
 import { recordMemberEvent } from '../analytics/tracker.js';
+import { EmbedBuilder } from 'discord.js';
 
 export default {
   name: 'guildMemberAdd',
   async execute(member, client) {
-    console.log('guildMemberAdd event triggered'); // Add this line
+    console.log('guildMemberAdd event triggered');
     try {
       // Record analytics
-      // You can uncomment this when tracker.js is working
-      /*
-      const { recordMemberEvent } = await import('../analytics/tracker.js');
-      await recordMemberEvent(member, 'join');
-      */
-      
+      try {
+        await recordMemberEvent(member, 'join');
+      } catch (error) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('member join analytics failed', error);
+        }
+      }
+
       const lines = [
         `Welcome, <@${member.id}>, to **${member.guild.name}**!`,
-        `You are member #${member.guild.memberCount}.`,
+        `You are member #${member.guild.memberCount}`,
         '',
         'Please read the rules and enjoy your stay!'
       ].join('\n');
@@ -22,8 +25,8 @@ export default {
       // Send welcome message to a specific channel
       const channel = member.guild.systemChannel || member.guild.channels.cache.find(ch => ch.name === 'general');
       if (channel) {
-        console.log('Sending welcome message'); // Add this line
-        const e = new client.discord.MessageEmbed()
+        console.log('Sending welcome message');
+        const e = new EmbedBuilder()
           .setColor('#0099ff')
           .setTitle('New Member!')
           .setDescription(lines)
@@ -31,15 +34,6 @@ export default {
           .setTimestamp(Date.now());
 
         await channel.send({ content: `${member}`, embeds: [e] });
-
-        try {
-          // Record for analytics
-          await recordMemberEvent(member, 'join');
-        } catch (error) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.warn('member join analytics failed', error);
-          }
-        }
       }
     } catch (error) {
       console.error('Error handling member join:', error);

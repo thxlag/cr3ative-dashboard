@@ -1,10 +1,9 @@
+
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { getDB } from '../../lib/db.js';
-// Removed getEconomySummary from this import, as it does not exist there.
 import { recordMessageActivity, recordCommandUsage, recordMemberEvent, recordCommandError } from '../../analytics/tracker.js';
-import { getPokemonSummary } from '../../modules/pokemon/service.js'; // Assuming path
 import { listJobs } from '../../utils/jobs.js';
 
 const router = Router();
@@ -37,7 +36,6 @@ const ensureManageGuild = async (req, res, next) => {
 
 // --- Helper Functions ---
 
-// NEW: This function queries the DB for a summary of the economy.
 function getEconomySummary() {
     const db = getDB();
     try {
@@ -50,6 +48,25 @@ function getEconomySummary() {
     } catch (error) {
         console.error('Error in getEconomySummary:', error);
         return { totalWallet: 0, totalBank: 0, totalUsers: 0 };
+    }
+}
+
+function getPokemonSummary(guildId) {
+    if (!guildId) return { totalCaptures: 0, uniqueCaptures: 0, topTrainers: [] };
+    const db = getDB();
+    try {
+        const totalRow = db.prepare('SELECT COUNT(*) as total FROM pokemon_captures WHERE guild_id = ?').get(guildId);
+        const uniqueRow = db.prepare('SELECT COUNT(DISTINCT pokemon_id) as total FROM pokemon_captures WHERE guild_id = ?').get(guildId);
+        const topTrainers = db.prepare('SELECT user_id, COUNT(*) AS total FROM pokemon_captures WHERE guild_id = ? GROUP BY user_id ORDER BY total DESC LIMIT 5').all(guildId);
+
+        return {
+            totalCaptures: totalRow?.total || 0,
+            uniqueCaptures: uniqueRow?.total || 0,
+            topTrainers: topTrainers || []
+        };
+    } catch (error) {
+        console.error(`Error in getPokemonSummary for guild ${guildId}:`, error);
+        return { totalCaptures: 0, uniqueCaptures: 0, topTrainers: [] };
     }
 }
 
@@ -109,7 +126,6 @@ router.get('/api/admin/summary', requireAdmin, async (req, res) => {
     const DASHBOARD_GUILD_ID = process.env.GUILD_ID;
     const DASHBOARD_GUILD_NAME = client.guilds.cache.get(DASHBOARD_GUILD_ID)?.name || 'Default Guild';
 
-    const stats = getEconomySummary(); // This will now call the new local function
     const sanitizedUser = {
       id: req.session.user.id,
       username: req.session.user.username,
@@ -121,7 +137,7 @@ router.get('/api/admin/summary', requireAdmin, async (req, res) => {
     res.json({
       user: sanitizedUser,
       stats: {
-        economy: stats,
+        economy: getEconomySummary(),
         pokemon: getPokemonSummary(DASHBOARD_GUILD_ID),
         jobs: { activeJobs: listJobs().length },
       },
