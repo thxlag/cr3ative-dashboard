@@ -1,3 +1,4 @@
+
 import { getDB } from '../lib/db.js';
 import { EmbedBuilder } from 'discord.js';
 import { incWallet } from '../lib/econ.js';
