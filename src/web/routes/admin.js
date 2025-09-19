@@ -1,4 +1,3 @@
-
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -110,7 +109,13 @@ async function computeGlobalStats() {
             users: client.guilds.cache.reduce((sum, g) => sum + (g.memberCount || 0), 0),
             latency: client.ws.ping || 0,
             commandsToday: summary.topCommands.reduce((sum, c) => sum + (c.count || 0), 0),
-            ...summary
+            // Flatten memberStats into the main object for global stats
+            joinCount: summary.memberStats.joinCount,
+            leaveCount: summary.memberStats.leaveCount,
+            netChange: summary.memberStats.netChange,
+            memberGrowth: summary.memberStats.memberGrowth,
+            topCommands: summary.topCommands,
+            topUsers: summary.topUsers
         };
     } catch (error) {
         console.error('Error computing global stats:', error);
@@ -120,9 +125,12 @@ async function computeGlobalStats() {
             users: 0,
             latency: 0,
             commandsToday: 0,
+            joinCount: 0,
+            leaveCount: 0,
+            netChange: 0,
+            memberGrowth: 0,
             topCommands: [],
-            topUsers: [],
-            memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 }
+            topUsers: []
         };
     }
 }
