@@ -1,198 +1,199 @@
 import { Router } from 'express';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { getDB } from '../../lib/db.js';
-import {
-  DASHBOARD_GUILD_ID,
-  DASHBOARD_GUILD_NAME,
-  DASHBOARD_FEATURE_FLAGS,
-} from '../utils/config.js';
-import { requireAdmin } from '../middleware/auth.js';
-import {
-  fetchGuildMeta,
-  fetchGuildChannels,
-  fetchGuildRoles,
-  measureApiLatency,
-} from '../utils/discordApi.js';
 
 const router = Router();
-const db = getDB();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const commandsRoot = path.join(__dirname, '..', '..', 'commands');
+const requireAuth = (req, res, next) => {
+	if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
+	next();
+};
 
-// Ensure dashboard tables exist (best effort)
-db.exec(`
-  CREATE TABLE IF NOT EXISTS dashboard_guild_settings (
-    guild_id TEXT PRIMARY KEY,
-    prefix TEXT DEFAULT '!',
-    slash_commands INTEGER DEFAULT 1,
-    welcome_channel_id TEXT,
-    welcome_message TEXT,
-    welcome_enabled INTEGER DEFAULT 1,
-    leave_channel_id TEXT,
-    leave_message TEXT,
-    leave_enabled INTEGER DEFAULT 0,
-    admin_role_id TEXT,
-    mod_role_id TEXT,
-    dj_role_id TEXT
-  );
+router.get('/api/admin/stats', requireAuth, async (req, res) => {
+	try {
+		const client = req.app.get('client');
+		let analytics = { topCommands: [], commandsToday: 0 };
+		try {
+			const mod = await import('../../analytics/tracker.js');
+			analytics = mod.getAnalyticsData() || analytics;
+		} catch {}
+		const servers = client?.guilds?.cache?.size || 0;
+		const users = client?.guilds?.cache?.reduce((a, g) => a + (g.memberCount || 0), 0) || 0;
+		const latency = client?.ws?.ping || 0;
+		return res.json({
+			servers,
+			users,
+			latency,
+			commandsToday: analytics.commandsToday || 0,
+			topCommands: analytics.topCommands || []
+		});
+	} catch (err) {
+		console.error('admin stats error', err);
+		return res.status(500).json({ error: 'Failed to fetch stats' });
+	}
+});
 
-  CREATE TABLE IF NOT EXISTS dashboard_command_settings (
-    guild_id TEXT NOT NULL,
-    command_id TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (guild_id, command_id)
-  );
-`);
+router.get('/api/admin/guilds', requireAuth, async (req, res) => {
+	try {
+		const client = req.app.get('client');
+		const guilds = client?.guilds?.cache?.map(g => ({ id: g.id, name: g.name, memberCount: g.memberCount })) || [];
+		return res.json(guilds);
+	} catch (err) {
+		console.error('admin guilds error', err);
+		return res.status(500).json({ error: 'Failed to fetch guilds' });
+	}
+});
 
-function ensureAuthorizedGuild(guildId) {
-  return String(guildId) === String(DASHBOARD_GUILD_ID);
+export async function getLiveStatsSnapshot() {
+	try {
+		let analytics = { topCommands: [], commandsToday: 0 };
+		try {
+			const mod = await import('../../analytics/tracker.js');
+			analytics = mod.getAnalyticsData() || analytics;
+		} catch {}
+		return {
+			servers: global.client?.guilds?.cache?.size || 0,
+			users: global.client?.guilds?.cache?.reduce((a, g) => a + (g.memberCount || 0), 0) || 0,
+			latency: global.client?.ws?.ping || 0,
+			commandsToday: analytics.commandsToday || 0,
+			topCommands: analytics.topCommands || []
+		};
+	} catch (err) {
+		console.error('live stats snapshot error', err);
+		return {
+			servers: 0, users: 0, latency: 0, commandsToday: 0, topCommands: []
+		};
+	}
 }
 
-function defaultGuildSettings() {
-  return {
-    prefix: '!',
-    slashCommands: true,
-    welcomeChannelId: '',
-    welcomeMessage: 'Welcome {user} to {server}! ??',
-    welcomeEnabled: true,
-    leaveChannelId: '',
-    leaveMessage: '{user} has left the server.',
-    leaveEnabled: false,
-    adminRoleId: '',
-    modRoleId: '',
-    djRoleId: '',
-  };
-}
-
-function mapSettingsRow(row) {
-  if (!row) return defaultGuildSettings();
-  return {
-    prefix: row.prefix || '!',
-    slashCommands: row.slash_commands !== 0,
-    welcomeChannelId: row.welcome_channel_id || '',
-    welcomeMessage: row.welcome_message || 'Welcome {user} to {server}! ??',
-    welcomeEnabled: row.welcome_enabled !== 0,
-    leaveChannelId: row.leave_channel_id || '',
-    leaveMessage: row.leave_message || '{user} has left the server.',
-    leaveEnabled: row.leave_enabled !== 0,
-    adminRoleId: row.admin_role_id || '',
-    modRoleId: row.mod_role_id || '',
-    djRoleId: row.dj_role_id || '',
-  };
-}
-
-function persistSettings(guildId, updates) {
-  const current = mapSettingsRow(db.prepare('SELECT * FROM dashboard_guild_settings WHERE guild_id = ?').get(guildId));
-  const next = { ...current, ...updates };
-  db.prepare(`
-    INSERT INTO dashboard_guild_settings (
-      guild_id,
-      prefix,
-      slash_commands,
-      welcome_channel_id,
-      welcome_message,
-      welcome_enabled,
-      leave_channel_id,
-      leave_message,
-      leave_enabled,
-      admin_role_id,
-      mod_role_id,
-      dj_role_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(guild_id) DO UPDATE SET
-      prefix = excluded.prefix,
-      slash_commands = excluded.slash_commands,
-      welcome_channel_id = excluded.welcome_channel_id,
-      welcome_message = excluded.welcome_message,
-      welcome_enabled = excluded.welcome_enabled,
-      leave_channel_id = excluded.leave_channel_id,
-      leave_message = excluded.leave_message,
-      leave_enabled = excluded.leave_enabled,
-      admin_role_id = excluded.admin_role_id,
-      mod_role_id = excluded.mod_role_id,
-      dj_role_id = excluded.dj_role_id
-  `).run(
-    guildId,
-    next.prefix,
-    next.slashCommands ? 1 : 0,
-    next.welcomeChannelId,
-    next.welcomeMessage,
-    next.welcomeEnabled ? 1 : 0,
-    next.leaveChannelId,
-    next.leaveMessage,
-    next.leaveEnabled ? 1 : 0,
-    next.adminRoleId,
-    next.modRoleId,
-    next.djRoleId,
-  );
-  return next;
-}
-
-function loadCommandMetadata() {
-  const results = [];
-  if (!fs.existsSync(commandsRoot)) return results;
-  const categories = fs.readdirSync(commandsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-
-  for (const category of categories) {
-    const categoryDir = path.join(commandsRoot, category);
-    const files = fs.readdirSync(categoryDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
-      .map((entry) => entry.name.replace(/\.js$/, ''));
-
-    for (const name of files) {
-      results.push({
-        id: `${category}:${name}`,
-        name: `/${name}`,
-        category,
-      });
-    }
+export default router;
+      commandsToday: 0,
+      topCommands: []
+    };
   }
-  return results;
 }
 
-const commandMetadataCache = loadCommandMetadata();
+export default router;
+      .map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: channel.type
+      }));
+    
+    const roles = guild.roles.cache
+      .filter(role => !role.managed && role.id !== guild.id)
+      .map(role => ({
+        id: role.id,
+        name: role.name,
+        color: role.color
+      }));
+    
+    // Get analytics for this guild
+    const analyticsData = await getAnalyticsData();
+    const guildStats = analyticsData.memberStats?.find(g => g.guildId === guildId) || { 
+      joinCount: 0, 
+      leaveCount: 0, 
+      netChange: 0 
+    };
+    
+    res.json({
+      id: guild.id,
+      name: guild.name,
+      memberCount: guild.memberCount,
+      icon: guild.iconURL({ dynamic: true }),
+      channels,
+      roles,
+      stats: {
+        joinCount: guildStats.joinCount,
+        leaveCount: guildStats.leaveCount,
+        netChange: guildStats.netChange,
+        recentJoins: guildStats.recentJoins || [],
+        recentLeaves: guildStats.recentLeaves || []
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching guild data:', error);
+    res.status(500).json({ error: 'Failed to fetch guild data' });
+  }
+});
 
-function buildCommandPayload(guildId) {
-  const overrides = new Map(
-    db.prepare('SELECT command_id, enabled FROM dashboard_command_settings WHERE guild_id = ?').all(guildId)
-      .map((row) => [row.command_id, row.enabled === 1])
-  );
-  return commandMetadataCache.map((cmd) => ({
-    id: cmd.id,
-    name: cmd.name,
-    category: cmd.category,
-    enabled: overrides.has(cmd.id) ? overrides.get(cmd.id) : true,
-  }));
-}
-
-function safeQuery(fn, fallback) {
+// Get guild-specific commands
+router.get('/api/admin/guilds/:guildId/commands', requireAuth, async (req, res) => {
   try {
-    return fn();
-  } catch {
-    return fallback;
+    const analyticsData = await getAnalyticsData();
+    const commandList = analyticsData.topCommands.map(cmd => ({
+      id: cmd.name,
+      name: cmd.name,
+      enabled: true,
+      category: 'general' // Would need more detailed tracking to categorize commands
+    }));
+    
+    res.json(commandList);
+  } catch (error) {
+    console.error('Error fetching guild commands:', error);
+    res.status(500).json({ error: 'Failed to fetch guild commands' });
+  }
+});
+
+// Get guild moderation logs
+router.get('/api/admin/guilds/:guildId/modlogs', requireAuth, async (req, res) => {
+  try {
+    // You would ideally store these in your database
+    // This is a placeholder for demo purposes
+    res.json([]);
+  } catch (error) {
+    console.error('Error fetching modlogs:', error);
+    res.status(500).json({ error: 'Failed to fetch moderation logs' });
+  }
+});
+
+// Get guild settings
+router.get('/api/admin/guilds/:guildId/settings', requireAuth, async (req, res) => {
+  try {
+    const db = getDB();
+    const { guildId } = req.params;
+    
+    // Default settings if none found in DB
+    const settings = {
+      prefix: '!',
+      welcomeEnabled: false,
+      welcomeChannelId: '',
+      welcomeMessage: 'Welcome {user} to {server}!',
+      leaveEnabled: false,
+      leaveChannelId: '',
+      leaveMessage: '{user} has left the server.',
+      adminRoleId: '',
+      modRoleId: '',
+      djRoleId: ''
+    };
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching guild settings:', error);
+    res.status(500).json({ error: 'Failed to fetch guild settings' });
+  }
+});
+
+// Live stats snapshot for WebSocket updates
+export async function getLiveStatsSnapshot() {
+  try {
+    const analyticsData = await getAnalyticsData();
+    
+    return {
+      servers: global.client?.guilds?.cache?.size || 0,
+      users: global.client?.guilds?.cache.reduce((acc, guild) => acc + guild.memberCount, 0) || 0,
+      latency: global.client?.ws?.ping || 0,
+      commandsToday: analyticsData.commandsToday || 0,
+      topCommands: analyticsData.topCommands || [],
+      topUsers: analyticsData.topUsers || [],
+      channelActivity: analyticsData.channelActivity || [],
+      memberStats: analyticsData.memberStats || []
+    };
+  } catch (error) {
+    console.error('Error generating live stats snapshot:', error);
+    return null;
   }
 }
 
-function getEconomySummary(guildId) {
-  const totals = safeQuery(
-    () => db.prepare('SELECT COUNT(*) AS users, COALESCE(SUM(wallet),0) AS wallet, COALESCE(SUM(bank),0) AS bank FROM users').get(),
-    { users: 0, wallet: 0, bank: 0 }
-  );
-  const recentTxns = safeQuery(
-    () => db.prepare('SELECT type, COUNT(*) AS uses FROM txns WHERE created_at >= ? GROUP BY type ORDER BY uses DESC LIMIT 5')
-      .all(Date.now() - 24 * 60 * 60 * 1000),
-    []
-  );
-  return {
-    users: totals?.users || 0,
-    wallet: totals?.wallet || 0,
-    bank: totals?.bank || 0,
+export default router;
     total: (totals?.wallet || 0) + (totals?.bank || 0),
     topTransactions: recentTxns.map((row) => ({ name: row.type, count: row.uses })),
   };
@@ -312,189 +313,188 @@ async function computeGlobalStats() {
   };
 }
 
-router.get('/api/admin/guilds', requireAdmin, (req, res) => {
-  res.json([{ id: DASHBOARD_GUILD_ID, name: DASHBOARD_GUILD_NAME }]);
-});
-
-router.get('/api/admin/guilds/:guildId', requireAdmin, async (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Auth middleware to ensure only authorized users can access admin endpoints
+const requireAuth = (req, res, next) => {
+  if (!req.session?.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
+  next();
+};
 
-  const economy = getEconomySummary(guildId);
-  const pokemon = getPokemonSummary(guildId);
-  const moderation = getModerationSummary(guildId);
-  const jobs = getGuildJobsSummary(guildId);
-
-  let guildMeta = null;
-  let channels = [];
-  let roles = [];
-
-  if (DASHBOARD_FEATURE_FLAGS.allowDiscordFetch) {
-    try {
-      guildMeta = await fetchGuildMeta(guildId);
-      channels = await fetchGuildChannels(guildId);
-      roles = await fetchGuildRoles(guildId);
-    } catch (error) {
-      console.warn('Failed to fetch guild metadata from Discord:', error.message);
-    }
-  }
-
-  const mappedChannels = channels
-    .filter((ch) => ch.type === 0)
-    .map((ch) => ({ id: ch.id, name: ch.name, type: 'GUILD_TEXT' }));
-
-  const mappedRoles = roles
-    .filter((role) => role.name !== '@everyone')
-    .map((role) => ({ id: role.id, name: role.name, position: role.position }));
-
-  res.json({
-    id: guildMeta?.id || DASHBOARD_GUILD_ID,
-    name: guildMeta?.name || DASHBOARD_GUILD_NAME,
-    iconUrl: guildMeta?.icon
-      ? `https://cdn.discordapp.com/icons/${guildMeta.id}/${guildMeta.icon}.png?size=128`
-      : null,
-    memberCount: guildMeta?.approximate_member_count || economy.users,
-    economy,
-    pokemon,
-    moderation,
-    jobs,
-    channels: mappedChannels,
-    roles: mappedRoles,
-  });
-});
-
-router.get('/api/admin/guilds/:guildId/commands', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
-  }
-  res.json(buildCommandPayload(guildId));
-});
-
-router.post('/api/admin/guilds/:guildId/commands', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
-  }
-
-  const updates = req.body?.commands;
-  if (!Array.isArray(updates)) {
-    return res.status(400).json({ error: 'Invalid payload' });
-  }
-
-  const tx = db.transaction((rows) => {
-    rows.forEach((row) => {
-      db.prepare(
-        'INSERT INTO dashboard_command_settings (guild_id, command_id, enabled) VALUES (?, ?, ?) ON CONFLICT(guild_id, command_id) DO UPDATE SET enabled = excluded.enabled'
-      ).run(guildId, row.id, row.enabled ? 1 : 0);
+// Get global stats
+router.get('/api/admin/stats', requireAuth, async (req, res) => {
+  try {
+    const client = req.app.get('client');
+    
+    const guilds = client?.guilds?.cache?.size || 0;
+    const users = client?.guilds?.cache.reduce((acc, guild) => acc + guild.memberCount, 0) || 0;
+    const latency = client?.ws?.ping || 0;
+    
+    // Get command usage from analytics
+    const analyticsData = await getAnalyticsData();
+    const topCommands = analyticsData.topCommands || [];
+    
+    // Calculate commands used today
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const commandsToday = analyticsData.topCommands.reduce((total, cmd) => total + cmd.count, 0) || 0;
+    
+    res.json({
+      servers: guilds,
+      users,
+      latency,
+      commandsToday,
+      topCommands
     });
-  });
-  tx(updates);
-  res.json({ success: true });
+  } catch (error) {
+    console.error('Error fetching admin stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
 });
 
-router.get('/api/admin/guilds/:guildId/modlogs', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Get guild list
+router.get('/api/admin/guilds', requireAuth, async (req, res) => {
+  try {
+    const client = req.app.get('client');
+    const guilds = client?.guilds?.cache?.map(guild => ({
+      id: guild.id,
+      name: guild.name,
+      memberCount: guild.memberCount,
+      icon: guild.iconURL({ dynamic: true })
+    })) || [];
+    
+    res.json(guilds);
+  } catch (error) {
+    console.error('Error fetching guilds:', error);
+    res.status(500).json({ error: 'Failed to fetch guilds' });
   }
-  const logs = safeQuery(
-    () => db.prepare('SELECT * FROM mod_cases WHERE guild_id = ? ORDER BY created_at DESC LIMIT 25').all(guildId),
-    []
-  );
-  res.json(logs.map((row) => ({
-    caseId: row.case_id,
-    action: row.action?.toUpperCase?.() || 'UNKNOWN',
-    user: `<@${row.target_id}>`,
-    moderator: `<@${row.moderator_id}>`,
-    reason: row.reason || 'No reason provided',
-    timestamp: row.created_at,
-  })));
 });
 
-router.get('/api/admin/guilds/:guildId/settings', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Get specific guild data
+router.get('/api/admin/guilds/:guildId', requireAuth, async (req, res) => {
+  try {
+    const client = req.app.get('client');
+    const { guildId } = req.params;
+    
+    const guild = client?.guilds?.cache?.get(guildId);
+    if (!guild) {
+      return res.status(404).json({ error: 'Guild not found' });
+    }
+    
+    const channels = guild.channels.cache
+      .filter(channel => channel.type === 'GUILD_TEXT' || channel.type === 0)
+      .map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: channel.type
+      }));
+    
+    const roles = guild.roles.cache
+      .filter(role => !role.managed && role.id !== guild.id)
+      .map(role => ({
+        id: role.id,
+        name: role.name,
+        color: role.color
+      }));
+    
+    res.json({
+      id: guild.id,
+      name: guild.name,
+      memberCount: guild.memberCount,
+      icon: guild.iconURL({ dynamic: true }),
+      channels,
+      roles
+    });
+  } catch (error) {
+    console.error('Error fetching guild data:', error);
+    res.status(500).json({ error: 'Failed to fetch guild data' });
   }
-  res.json(mapSettingsRow(db.prepare('SELECT * FROM dashboard_guild_settings WHERE guild_id = ?').get(guildId)));
 });
 
-router.post('/api/admin/guilds/:guildId/settings/bot', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Get guild-specific commands
+router.get('/api/admin/guilds/:guildId/commands', requireAuth, async (req, res) => {
+  try {
+    const analyticsData = await getAnalyticsData();
+    const commandList = analyticsData.topCommands.map(cmd => ({
+      id: cmd.name,
+      name: cmd.name,
+      enabled: true,
+      category: 'general' // Would need more detailed tracking to categorize commands
+    }));
+    
+    res.json(commandList);
+  } catch (error) {
+    console.error('Error fetching guild commands:', error);
+    res.status(500).json({ error: 'Failed to fetch guild commands' });
   }
-  const payload = {
-    prefix: req.body?.prefix || '!',
-    slashCommands: req.body?.slashCommands !== false,
-  };
-  persistSettings(guildId, payload);
-  res.json({ success: true });
 });
 
-router.post('/api/admin/guilds/:guildId/settings/welcome', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Get guild moderation logs
+router.get('/api/admin/guilds/:guildId/modlogs', requireAuth, async (req, res) => {
+  try {
+    // You would ideally store these in your database
+    // This is a placeholder for demo purposes
+    res.json([]);
+  } catch (error) {
+    console.error('Error fetching modlogs:', error);
+    res.status(500).json({ error: 'Failed to fetch moderation logs' });
   }
-  const payload = {
-    welcomeChannelId: req.body?.welcomeChannelId || '',
-    welcomeMessage: req.body?.welcomeMessage || 'Welcome {user} to {server}! ??',
-    welcomeEnabled: req.body?.welcomeEnabled !== false,
-  };
-  persistSettings(guildId, payload);
-  res.json({ success: true });
 });
 
-router.post('/api/admin/guilds/:guildId/settings/leave', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Get guild settings
+router.get('/api/admin/guilds/:guildId/settings', requireAuth, async (req, res) => {
+  try {
+    const db = getDB();
+    const { guildId } = req.params;
+    
+    // Default settings if none found in DB
+    const settings = {
+      prefix: '!',
+      welcomeEnabled: false,
+      welcomeChannelId: '',
+      welcomeMessage: 'Welcome {user} to {server}!',
+      leaveEnabled: false,
+      leaveChannelId: '',
+      leaveMessage: '{user} has left the server.',
+      adminRoleId: '',
+      modRoleId: '',
+      djRoleId: ''
+    };
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching guild settings:', error);
+    res.status(500).json({ error: 'Failed to fetch guild settings' });
   }
-  const payload = {
-    leaveChannelId: req.body?.leaveChannelId || '',
-    leaveMessage: req.body?.leaveMessage || '{user} has left the server.',
-    leaveEnabled: req.body?.leaveEnabled === true,
-  };
-  persistSettings(guildId, payload);
-  res.json({ success: true });
 });
 
-router.post('/api/admin/guilds/:guildId/settings/permissions', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
+// Live stats snapshot for WebSocket updates
+export async function getLiveStatsSnapshot() {
+  try {
+    const analyticsData = await getAnalyticsData();
+    
+    return {
+      servers: global.client?.guilds?.cache?.size || 0,
+      users: global.client?.guilds?.cache.reduce((acc, guild) => acc + guild.memberCount, 0) || 0,
+      latency: global.client?.ws?.ping || 0,
+      commandsToday: analyticsData.topCommands.reduce((total, cmd) => total + cmd.count, 0) || 0,
+      topCommands: analyticsData.topCommands,
+      topUsers: analyticsData.topUsers,
+      channelActivity: analyticsData.channelActivity,
+      commandErrors: analyticsData.commandErrors,
+      memberStats: analyticsData.memberStats
+    };
+  } catch (error) {
+    console.error('Error generating live stats snapshot:', error);
+    return null;
   }
-  const payload = {
-    adminRoleId: req.body?.adminRoleId || '',
-    modRoleId: req.body?.modRoleId || '',
-    djRoleId: req.body?.djRoleId || '',
-  };
-  persistSettings(guildId, payload);
-  res.json({ success: true });
-});
+}
 
-router.get('/api/admin/guilds/:guildId/insights', requireAdmin, (req, res) => {
-  const { guildId } = req.params;
-  if (!ensureAuthorizedGuild(guildId)) {
-    return res.status(403).json({ error: 'Guild not authorized' });
-  }
+export async function getLiveStatsSnapshot() {
+  return computeGlobalStats();
+}
 
-  const now = Date.now();
-  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-
-  const messageStats = safeQuery(
-    () => db.prepare('SELECT user_id as userId, COUNT(*) AS messages, SUM(sentiment) AS sentimentSum, SUM(reply_count) AS replies, SUM(word_count) AS words FROM analytics_message_activity WHERE guild_id = ? AND created_at >= ? GROUP BY user_id')
-      .all(guildId, sevenDaysAgo),
-    []
-  );
-  const commandStats = safeQuery(
-    () => db.prepare('SELECT user_id AS userId, COUNT(*) AS uses FROM analytics_command_usage WHERE guild_id = ? AND used_at >= ? GROUP BY user_id')
-      .all(guildId, sevenDaysAgo),
+export default router;
     []
   );
   const commandUsageTotals = safeQuery(

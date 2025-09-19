@@ -8,6 +8,7 @@ import { incBurstMetric } from '../utils/events.js';
 import { grantAchievement } from '../utils/achievements.js';
 import { handlePokemonMessage } from '../modules/pokemon/service.js';
 import { postAchievement } from '../utils/achievements_feed.js';
+import { recordMessageActivity } from '../analytics/tracker.js';
 
 const MAX_MULT = 3.0;
 
@@ -70,4 +71,32 @@ export async function onMessageCreate(message) {
   } catch (error) {
     console.error('pokemon spawn handling failed', error);
   }
+
+  // Record message activity for analytics
+  try {
+    await recordMessageActivity(message);
+  } catch (error) {
+    console.error('Failed to record message analytics:', error);
+  }
 }
+
+export default {
+  name: 'messageCreate',
+  async execute(message, client) {
+    // Skip bot messages
+    if (message.author?.bot) return;
+    
+    try {
+      // Record message analytics
+      // You can uncomment this when tracker.js is working
+      /*
+      const { recordMessage } = await import('../analytics/tracker.js');
+      await recordMessage(message);
+      */
+      
+      // Add any other message handling logic here
+    } catch (error) {
+      console.error('Failed to process message:', error);
+    }
+  }
+};

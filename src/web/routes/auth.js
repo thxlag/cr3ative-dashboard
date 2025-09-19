@@ -1,32 +1,35 @@
-import { Router } from 'express';
+import { Router } from "express";
 import {
   buildAuthUrl,
   exchangeCodeForToken,
   fetchDiscordUser,
   fetchDiscordGuilds,
   filterAdminGuilds,
-} from '../utils/discordOAuth.js';
-import { DASHBOARD_GUILD_ID, DASHBOARD_GUILD_NAME } from '../utils/config.js';
+} from "../utils/discordOAuth.js";
+import { DASHBOARD_GUILD_ID, DASHBOARD_GUILD_NAME } from "../utils/config.js";
 
 const router = Router();
 
 function sanitizeState(input) {
-  if (typeof input !== 'string' || !input.trim()) {
-    return '/';
+  if (typeof input !== "string" || !input.trim()) {
+    return "/";
   }
+
   let value = input;
   try {
     value = decodeURIComponent(input);
   } catch {
     value = input;
   }
-  if (!value.startsWith('/')) {
+
+  if (!value.startsWith("/")) {
     value = `/${value}`;
   }
+
   return value;
 }
 
-router.get('/auth/login', (req, res) => {
+router.get("/auth/login", (req, res) => {
   try {
     const state = sanitizeState(req.query.state);
     const url = buildAuthUrl(encodeURIComponent(state));
@@ -36,14 +39,14 @@ router.get('/auth/login', (req, res) => {
   }
 });
 
-router.get('/auth/callback', async (req, res) => {
-  const { code, error: oauthError } = req.query;
+router.get("/auth/callback", async (req, res) => {
+  const { code, error: oauthError, state: rawState } = req.query;
 
   if (oauthError) {
     return res.status(400).send(`OAuth error: ${oauthError}`);
   }
-  if (!code || typeof code !== 'string') {
-    return res.status(400).send('Missing code parameter');
+  if (!code || typeof code !== "string") {
+    return res.status(400).send("Missing code parameter");
   }
 
   try {
@@ -71,20 +74,20 @@ router.get('/auth/callback', async (req, res) => {
       tokenType: token.token_type,
     };
 
-    const redirectTarget = sanitizeState(req.query.state);
+    const redirectTarget = sanitizeState(rawState);
     res.redirect(redirectTarget);
   } catch (error) {
     res.status(500).send(`OAuth callback failed: ${error.message}`);
   }
 });
 
-router.post('/auth/logout', (req, res) => {
+router.post("/auth/logout", (req, res) => {
   req.session?.destroy?.(() => {
     res.json({ success: true });
   });
 });
 
-router.get('/auth/session', (req, res) => {
+router.get("/auth/session", (req, res) => {
   if (!req.session?.user) {
     return res.json({ authenticated: false });
   }

@@ -546,6 +546,12 @@
               <div class="nav-item" data-panel="jobs">Jobs</div>
               <div class="nav-item" data-panel="streaming">Streaming</div>
             </div>
+
+            <!-- New Utilities section -->
+            <div class="nav-section">
+              <h3>Utilities</h3>
+              <div class="nav-item" data-panel="console">Console</div>
+            </div>
           </div>
           
           <!-- Main Content Area -->
@@ -932,6 +938,25 @@
                 </form>
               </div>
             </div>
+            
+            <!-- New Console Panel -->
+            <div class="panel" id="panel-console">
+              <h2>Console</h2>
+              <div class="settings-group">
+                <h3>Bot Console</h3>
+                <div class="form-group">
+                  <label for="console-channel">Channel</label>
+                  <select id="console-channel">
+                    <option value="">Select channel...</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="console-input">Message or Command</label>
+                  <textarea id="console-input" placeholder="Type a message or slash-command here..."></textarea>
+                </div>
+                <button class="primary" id="btn-console-send">Send as Bot</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -954,10 +979,14 @@
       const navItems = document.querySelectorAll('.nav-item');
       const panels = document.querySelectorAll('.panel');
       let socket = null;
+      let currentGuildId = null;  // track selected guild
 
       async function fetchJSON(url, options) {
         const res = await fetch(url, options);
-        if (!res.ok) throw new Error(`${res.status}`);
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`HTTP error! status: ${res.status}, body: ${errorText}`);
+        }
         return res.json();
       }
 
@@ -975,6 +1004,7 @@
         socket.onopen = function() {
           console.log('WebSocket connected');
           updateConnectionStatus(true);
+          sendHeartbeat(); // Start sending heartbeats
         };
         
         socket.onclose = function() {
@@ -1000,6 +1030,18 @@
               break;
           }
         };
+
+        socket.onerror = function(error) {
+          console.error('WebSocket error:', error);
+        };
+      }
+
+      // Heartbeat mechanism
+      function sendHeartbeat() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'heartbeat' }));
+        }
+        setTimeout(sendHeartbeat, 30000); // Send heartbeat every 30 seconds
       }
       
       function updateConnectionStatus(online) {
@@ -1082,6 +1124,7 @@
       // Load guild-specific data
       async function loadGuildData(guildId) {
         try {
+          currentGuildId = guildId;
           const guildData = await fetchJSON(`/api/admin/guilds/${guildId}`);
           
           // Update stats
@@ -1090,6 +1133,7 @@
           // Update channels and roles dropdowns
           updateChannelsDropdown(guildData.channels);
           updateRolesDropdown(guildData.roles);
+          updateConsoleDropdown(guildData.channels);        // populate console channels
           
           // Load command settings
           loadCommandSettings(guildId);
@@ -1540,6 +1584,27 @@
       }
       // Start the application
       init();
+
+      // New: send console message
+      document.getElementById('btn-console-send').addEventListener('click', async () => {
+        const channelId = document.getElementById('console-channel').value;
+        const content = document.getElementById('console-input').value.trim();
+        if (!currentGuildId || !channelId || !content) {
+          return alert('Select a server, channel, and enter a message.');
+        }
+        try {
+          await fetchJSON(`/api/admin/guilds/${currentGuildId}/console`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId, content })
+          });
+          alert('Message sent!');
+          document.getElementById('console-input').value = '';
+        } catch (err) {
+          console.error('Console send failed:', err);
+          alert('Failed to send message. Check console.');
+        }
+      });
     </script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-import { log } from '../utils/logger.js';\nimport { recordCommandUsage, recordCommandError } from '../analytics/tracker.js';
+import { log } from '../utils/logger.js';
 import { EPHEMERAL } from '../utils/flags.js';
 import { setUserJob, getJob, canApplyToJob, jobChangeRemainingMs, getUserJob, timeUntilWork } from '../utils/jobs.js';
 import { claimAll } from '../utils/quests.js';
@@ -15,6 +15,30 @@ import aboutbotCommand from '../commands/utilities/aboutbot.js';
 
 const getAboutBotCommand = (client) => client.commands.get('aboutbot') ?? aboutbotCommand;
 
+// Simple wrapper for analytics that won't crash if the analytics module isn't ready
+async function safeTrackCommand(interaction, success, error = null) {
+  try {
+    const { recordCommandUsage, recordCommandError } = await import('../analytics/tracker.js');
+    
+    if (success) {
+      await recordCommandUsage({
+        commandName: interaction.commandName,
+        userId: interaction.user?.id,
+        guildId: interaction.guildId
+      });
+    } else if (error) {
+      await recordCommandError({
+        commandName: interaction.commandName,
+        userId: interaction.user?.id,
+        error
+      });
+    }
+  } catch (err) {
+    // Silently fail if analytics tracking fails
+    console.error('Failed to track command:', err);
+  }
+}
+
 export async function onInteraction(interaction, db, streamHandler) {
   const report = async (label, err) => {
     try {
@@ -26,7 +50,9 @@ export async function onInteraction(interaction, db, streamHandler) {
       const details = (err?.message || String(err || 'error')).slice(0, 500);
       const location = interaction.guild ? `${interaction.guild.name} (${interaction.guildId})` : 'Direct Message';
       await ch.send({ content: `[${label}] ${errId} - <@${interaction.user.id}> - ${location}\n${details}` });
-    } catch {}
+    } catch (reportingError) {
+      console.error('Error reporting error:', reportingError);
+    }
   };
 
   try {
@@ -42,32 +68,9 @@ export async function onInteraction(interaction, db, streamHandler) {
       const startedAt = Date.now();
       try {
         await command.execute(interaction, interaction.client, db, streamHandler);
-        recordCommandUsage({
-          guildId: interaction.guildId ?? null,
-          channelId: interaction.channelId ?? null,
-          userId: interaction.user?.id ?? 'unknown',
-          commandName: interaction.commandName,
-          success: true,
-          durationMs: Date.now() - startedAt,
-          usedAt: startedAt,
-        });
+        await safeTrackCommand(interaction, true);
       } catch (error) {
-        recordCommandError({
-          guildId: interaction.guildId ?? null,
-          userId: interaction.user?.id ?? 'unknown',
-          commandName: interaction.commandName,
-          error,
-          occurredAt: Date.now(),
-        });
-        recordCommandUsage({
-          guildId: interaction.guildId ?? null,
-          channelId: interaction.channelId ?? null,
-          userId: interaction.user?.id ?? 'unknown',
-          commandName: interaction.commandName,
-          success: false,
-          durationMs: Date.now() - startedAt,
-          usedAt: startedAt,
-        });
+        await safeTrackCommand(interaction, false, error);
         throw error;
       }
     }

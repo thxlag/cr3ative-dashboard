@@ -7,13 +7,29 @@ import { onInteraction } from "./listeners/interactionCreate.js";
 import { setupReady } from "./listeners/ready.js";
 import { onMessageCreate } from "./listeners/messageCreate.js";
 import { onMessageAnalytics } from "./listeners/messageAnalytics.js";
-import { onGuildMemberAdd } from "./listeners/guildMemberAdd.js";
-import { onGuildMemberRemove } from "./listeners/guildMemberRemove.js";
+//import { onGuildMemberAdd } from "./listeners/guildMemberAdd.js";
+//import { onGuildMemberRemove } from "./listeners/guildMemberRemove.js";
 import { onStreamChat, startStreamManager } from "./streams/manager.js";
 import { processChatMessage } from "./streams/bridge.js";
 import StreamHandler from "./modules/streaming/streamHandler.js";
 import streamEventHandler from "./modules/streaming/events/streamEvents.js";
 import { initPokemon } from "./modules/pokemon/service.js";
+
+// Load environment variables
+import * as dotenv from 'dotenv';
+dotenv.config();
+
+// Log environment variables
+console.log('Environment Variables:', process.env);
+
+// Validate required environment variables
+const requiredEnvVars = ['BOT_TOKEN', 'CLIENT_ID', 'GUILD_ID'];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`Missing environment variable: ${envVar}`);
+    process.exit(1); // Exit if a required variable is missing
+  }
+}
 
 export const client = new Client({
   intents: [
@@ -39,8 +55,15 @@ await initPokemon(client, db);
 
 client.on(Events.MessageCreate, onMessageCreate);
 client.on(Events.MessageCreate, onMessageAnalytics);
-client.on(Events.GuildMemberAdd, onGuildMemberAdd);
-client.on(Events.GuildMemberRemove, onGuildMemberRemove);
+
+// Import listeners
+import messageCreateListener from './listeners/messageCreate.js';
+import guildMemberAddListener from './listeners/guildMemberAdd.js';
+import guildMemberRemoveListener from './listeners/guildMemberRemove.js';
+
+// Register these listeners
+client.on(guildMemberAddListener.name, (...args) => guildMemberAddListener.execute(...args, client));
+client.on(guildMemberRemoveListener.name, (...args) => guildMemberRemoveListener.execute(...args, client));
 
 onStreamChat(async (platform, meta) => {
   try {
@@ -74,6 +97,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       log.error("Error in streamEventHandler", error);
     }
   }
+});
+
+// Global error handling for unhandled rejections
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error);
 });
 
 client.login(process.env.BOT_TOKEN).catch((error) => {
