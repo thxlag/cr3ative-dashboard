@@ -1,3 +1,4 @@
+
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -85,21 +86,6 @@ function getAnalyticsSummary(guildId = null) {
         const leaveCount = memberEvents.find(e => e.event_type === 'leave')?.count || 0;
         const netChange = joinCount - leaveCount;
 
-        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        const messageStats = db.prepare(`
-            SELECT
-              user_id      AS userId,
-              COUNT(*)     AS messages,
-              SUM(sentiment) AS sentimentSum,
-              SUM(is_reply) AS replies,
-              SUM(word_count) AS words
-            FROM analytics_message_activity
-            WHERE guild_id = ? AND created_at >= ?
-            GROUP BY user_id
-            ORDER BY messages DESC
-            LIMIT 15
-          `).all(guildId, sevenDaysAgo);
-
         return {
             topCommands,
             topUsers,
@@ -108,12 +94,11 @@ function getAnalyticsSummary(guildId = null) {
                 leaveCount,
                 netChange,
                 memberGrowth: netChange
-            },
-            messageStats
+            }
         };
     } catch (error) {
         console.error('Error in getAnalyticsSummary:', error);
-        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 }, messageStats: [] };
+        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 } };
     }
 }
 
@@ -129,7 +114,16 @@ async function computeGlobalStats() {
         };
     } catch (error) {
         console.error('Error computing global stats:', error);
-        return null;
+        // REVISED: Return a safe default object instead of null
+        return {
+            servers: 0,
+            users: 0,
+            latency: 0,
+            commandsToday: 0,
+            topCommands: [],
+            topUsers: [],
+            memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 }
+        };
     }
 }
 
@@ -290,25 +284,7 @@ router.post('/api/admin/guilds/:guildId/console', ensureManageGuild, async (req,
 // --- WebSocket Support ---
 
 export async function getLiveStatsSnapshot() {
-  try {
-    const analyticsData = await getAnalyticsData();
-
-    return {
-      servers: client.guilds.cache.size || 0,
-      users: client.guilds.cache.reduce((sum, g) => sum + (g.memberCount || 0), 0),
-      latency: client.ws.ping || 0,
-      commandsToday: analyticsData.topCommands.reduce((sum, c) => sum + (c.count || 0), 0),
-      topCommands: analyticsData.topCommands,
-
-      // prevent front-end chart code from breaking
-      memberGrowth: [],       
-      messageActivity: [],   
-      roleDistribution: []   
-    };
-  } catch (err) {
-    console.error('getLiveStatsSnapshot error:', err);
-    return null;
-  }
+  return computeGlobalStats();
 }
 
 export default router;
