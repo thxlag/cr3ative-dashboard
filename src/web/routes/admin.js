@@ -1,3 +1,4 @@
+
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -69,20 +70,16 @@ function getPokemonSummary(guildId) {
     }
 }
 
+// REWRITTEN: This function now correctly builds SQL queries.
 function getAnalyticsSummary(guildId = null) {
     const db = getDB();
-    const whereClause = guildId ? `WHERE guild_id = '${guildId}'` : '';
-    const guildFilter = (query) => query.replace('WHERE', whereClause);
+    const params = guildId ? [guildId] : [];
+    const where = guildId ? 'WHERE guild_id = ?' : '';
 
     try {
-        const topCommandsQuery = guildFilter('SELECT command_name as name, COUNT(*) as count FROM analytics_command_usage WHERE GROUP BY command_name ORDER BY count DESC LIMIT 10');
-        const topCommands = db.prepare(topCommandsQuery).all();
-
-        const topUsersQuery = guildFilter('SELECT user_id as id, user_name as name, COUNT(*) as count FROM analytics_message_activity WHERE GROUP BY user_id, user_name ORDER BY count DESC LIMIT 10');
-        const topUsers = db.prepare(topUsersQuery).all();
-
-        const memberEventsQuery = guildFilter('SELECT event_type, COUNT(*) as count FROM analytics_member_events WHERE GROUP BY event_type');
-        const memberEvents = db.prepare(memberEventsQuery).all();
+        const topCommands = db.prepare(`SELECT command_name as name, COUNT(*) as count FROM analytics_command_usage ${where} GROUP BY command_name ORDER BY count DESC LIMIT 10`).all(...params);
+        const topUsers = db.prepare(`SELECT user_id as id, user_name as name, COUNT(*) as count FROM analytics_message_activity ${where} GROUP BY user_id, user_name ORDER BY count DESC LIMIT 10`).all(...params);
+        const memberEvents = db.prepare(`SELECT event_type, COUNT(*) as count FROM analytics_member_events ${where} GROUP BY event_type`).all(...params);
 
         const joinCount = memberEvents.find(e => e.event_type === 'join')?.count || 0;
         const leaveCount = memberEvents.find(e => e.event_type === 'leave')?.count || 0;
@@ -95,7 +92,7 @@ function getAnalyticsSummary(guildId = null) {
                 joinCount,
                 leaveCount,
                 netChange,
-                memberGrowth: netChange // Added this field for the frontend
+                memberGrowth: netChange
             }
         };
     } catch (error) {
