@@ -1,3 +1,4 @@
+
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -91,13 +92,13 @@ function getAnalyticsSummary(guildId = null) {
             memberStats: {
                 joinCount,
                 leaveCount,
-                netChange,
-                memberGrowth: netChange
+                netChange
+                // memberGrowth: netChange // REMOVED
             }
         };
     } catch (error) {
         console.error('Error in getAnalyticsSummary:', error);
-        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0, memberGrowth: 0 } };
+        return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0 } };
     }
 }
 
@@ -109,11 +110,8 @@ async function computeGlobalStats() {
             users: client.guilds.cache.reduce((sum, g) => sum + (g.memberCount || 0), 0),
             latency: client.ws.ping || 0,
             commandsToday: summary.topCommands.reduce((sum, c) => sum + (c.count || 0), 0),
-            // Flatten memberStats into the main object for global stats
-            joinCount: summary.memberStats.joinCount,
-            leaveCount: summary.memberStats.leaveCount,
-            netChange: summary.memberStats.netChange,
-            memberGrowth: summary.memberStats.memberGrowth,
+            // Pass memberStats as an object, without memberGrowth
+            memberStats: summary.memberStats,
             topCommands: summary.topCommands,
             topUsers: summary.topUsers
         };
@@ -125,10 +123,7 @@ async function computeGlobalStats() {
             users: 0,
             latency: 0,
             commandsToday: 0,
-            joinCount: 0,
-            leaveCount: 0,
-            netChange: 0,
-            memberGrowth: 0,
+            memberStats: { joinCount: 0, leaveCount: 0, netChange: 0 },
             topCommands: [],
             topUsers: []
         };
