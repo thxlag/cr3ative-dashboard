@@ -1,9 +1,8 @@
-
 import { Router } from 'express';
 import { client } from '../../index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { getDB } from '../../lib/db.js';
-import { getEconomySummary } from '../../lib/econ.js'; // Assuming path
+// Removed getEconomySummary from this import, as it does not exist there.
 import { recordMessageActivity, recordCommandUsage, recordMemberEvent, recordCommandError } from '../../analytics/tracker.js';
 import { getPokemonSummary } from '../../modules/pokemon/service.js'; // Assuming path
 import { getGuildJobsSummary } from '../../utils/jobs.js'; // Assuming path
@@ -38,7 +37,22 @@ const ensureManageGuild = async (req, res, next) => {
 
 // --- Helper Functions ---
 
-// This function queries the database directly to build an analytics summary.
+// NEW: This function queries the DB for a summary of the economy.
+function getEconomySummary() {
+    const db = getDB();
+    try {
+        const totals = db.prepare('SELECT SUM(wallet) as totalWallet, SUM(bank) as totalBank, COUNT(*) as totalUsers FROM users').get();
+        return {
+            totalWallet: totals.totalWallet || 0,
+            totalBank: totals.totalBank || 0,
+            totalUsers: totals.totalUsers || 0,
+        };
+    } catch (error) {
+        console.error('Error in getEconomySummary:', error);
+        return { totalWallet: 0, totalBank: 0, totalUsers: 0 };
+    }
+}
+
 function getAnalyticsSummary(guildId = null) {
     const db = getDB();
     const whereClause = guildId ? `WHERE guild_id = '${guildId}'` : '';
@@ -68,19 +82,18 @@ function getAnalyticsSummary(guildId = null) {
         };
     } catch (error) {
         console.error('Error in getAnalyticsSummary:', error);
-        // Return a default object on error to prevent crashes
         return { topCommands: [], topUsers: [], memberStats: { joinCount: 0, leaveCount: 0, netChange: 0 } };
     }
 }
 
 async function computeGlobalStats() {
     try {
-        const summary = getAnalyticsSummary(); // Get global summary
+        const summary = getAnalyticsSummary();
         return {
             servers: client.guilds.cache.size || 0,
             users: client.guilds.cache.reduce((sum, g) => sum + (g.memberCount || 0), 0),
             latency: client.ws.ping || 0,
-            commandsToday: summary.topCommands.reduce((sum, c) => sum + (c.count || 0), 0), // Note: This is all-time top 10, not 'today'
+            commandsToday: summary.topCommands.reduce((sum, c) => sum + (c.count || 0), 0),
             ...summary
         };
     } catch (error) {
@@ -96,7 +109,7 @@ router.get('/api/admin/summary', requireAdmin, async (req, res) => {
     const DASHBOARD_GUILD_ID = process.env.GUILD_ID;
     const DASHBOARD_GUILD_NAME = client.guilds.cache.get(DASHBOARD_GUILD_ID)?.name || 'Default Guild';
 
-    const stats = getEconomySummary();
+    const stats = getEconomySummary(); // This will now call the new local function
     const sanitizedUser = {
       id: req.session.user.id,
       username: req.session.user.username,
