@@ -5,7 +5,7 @@ import { getDB } from '../../lib/db.js';
 // Removed getEconomySummary from this import, as it does not exist there.
 import { recordMessageActivity, recordCommandUsage, recordMemberEvent, recordCommandError } from '../../analytics/tracker.js';
 import { getPokemonSummary } from '../../modules/pokemon/service.js'; // Assuming path
-import { getGuildJobsSummary } from '../../utils/jobs.js'; // Assuming path
+import { listJobs } from '../../utils/jobs.js';
 
 const router = Router();
 const ownerId = process.env.OWNER_ID?.trim();
@@ -123,7 +123,7 @@ router.get('/api/admin/summary', requireAdmin, async (req, res) => {
       stats: {
         economy: stats,
         pokemon: getPokemonSummary(DASHBOARD_GUILD_ID),
-        jobs: { activeJobs: getGuildJobsSummary(DASHBOARD_GUILD_ID).length },
+        jobs: { activeJobs: listJobs().length },
       },
     });
   } catch (error) {
