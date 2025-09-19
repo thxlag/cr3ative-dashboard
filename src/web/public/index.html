@@ -1006,34 +1006,39 @@
       // Initialize WebSocket connection
       function initWebSocket() {
         if (socket) {
-          socket.close();
+          try {
+            socket.close();
+          } catch (e) {
+            console.error('Error closing existing socket:', e);
+          }
         }
         
         try {
           const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          // Use a direct path rather than hostname to avoid CORS issues
           const wsUrl = `${protocol}//${window.location.host}/ws`;
           
           console.log(`Connecting to WebSocket at ${wsUrl}`);
           
-          // Add a status message to show connection attempt
+          // Display connection attempt status
           statusArea.innerHTML += `<div class="status" style="background: rgba(56, 189, 248, 0.08); border-color: rgba(56, 189, 248, 0.2); margin-bottom: 10px;">
-            Attempting to connect to WebSocket...
+            Attempting to connect to WebSocket at ${wsUrl}...
           </div>`;
           
           socket = new WebSocket(wsUrl);
           
           socket.onopen = function() {
-            console.log('WebSocket connected');
+            console.log('WebSocket connected successfully');
             updateConnectionStatus(true);
-            reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+            reconnectAttempts = 0; 
             
-            // Replace status message on successful connection
-            statusArea.innerHTML = statusArea.innerHTML.replace(
-              /Attempting to connect to WebSocket/g, 
-              'WebSocket connected successfully'
-            );
+            // Update status message
+            const statusElements = statusArea.getElementsByClassName('status');
+            if (statusElements.length > 0) {
+              statusElements[statusElements.length - 1].innerHTML = 'WebSocket connected successfully! Real-time updates enabled.';
+            }
             
-            sendHeartbeat(); // Start sending heartbeats
+            sendHeartbeat();
           };
           
           socket.onclose = function(event) {
@@ -1074,12 +1079,42 @@
           };
         } catch (error) {
           console.error('Failed to initialize WebSocket:', error);
+          const errorDisplay = document.getElementById('error-display');
+          const errorDetails = document.getElementById('error-details');
+          
+          if (errorDisplay && errorDetails) {
+            errorDisplay.style.display = 'block';
+            errorDetails.textContent += `WebSocket Error: ${error.message}\n\n`;
+          }
+          
           statusArea.innerHTML += `<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">
-            WebSocket connection failed: ${error.message}
+            WebSocket connection failed: ${error.message} - Using fallback polling for updates.
           </div>`;
           
-          // Still try to reconnect
-          setTimeout(initWebSocket, 5000);
+          // Implement a fallback to polling if WebSockets fail
+          startPolling();
+        }
+      }
+      
+      // Fallback polling function for when WebSockets fail
+      function startPolling() {
+        console.log('Starting polling fallback');
+        // Poll every 10 seconds
+        window.pollingInterval = setInterval(async () => {
+          try {
+            const stats = await fetchJSON('/api/admin/stats');
+            updateStats(stats);
+          } catch (error) {
+            console.error('Polling failed:', error);
+          }
+        }, 10000);
+      }
+
+      // Stop polling if it's running
+      function stopPolling() {
+        if (window.pollingInterval) {
+          clearInterval(window.pollingInterval);
+          window.pollingInterval = null;
         }
       }
 
@@ -1648,11 +1683,26 @@
         }
       }
       
-      // Safely handle chart data initialization with better error handling
+      // Fix for the memberGrowth error - define a more robust function
+      function safeObjectAccess(obj, path, defaultValue = null) {
+        if (obj === undefined || obj === null) return defaultValue;
+        const keys = path.split('.');
+        let current = obj;
+        
+        for (const key of keys) {
+          if (current === undefined || current === null || typeof current !== 'object') {
+            return defaultValue;
+          }
+          current = current[key];
+        }
+        
+        return current !== undefined && current !== null ? current : defaultValue;
+      }
+
+      // Modified handleCharts function with better error handling
       function handleCharts(stats) {
         try {
           // For now, we'll just add placeholder content to chart containers
-          // since we don't have Chart.js integrated
           const chartContainers = [
             'chart-top-commands',
             'chart-member-growth',
@@ -1663,240 +1713,723 @@
           chartContainers.forEach(containerId => {
             const container = document.getElementById(containerId);
             if (container) {
-              container.innerHTML = '<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted);">Chart data loading... <br>(or Chart.js integration missing)</div>';
+              container.innerHTML = '<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted);">Chart data placeholder</div>';
             }
           });
           
-          // Create safe references to potentially missing data to prevent the memberGrowth error
-          const safeStats = {
-            memberStats: stats?.memberStats || { memberGrowth: [] },
-            messageStats: stats?.messageStats || { activity: [] },
-            topCommands: stats?.topCommands || [],
-            roleStats: stats?.roleStats || { distribution: [] }
-          };
+          // Use our safe accessor function to avoid the TypeError
+          const memberGrowth = safeObjectAccess(stats, 'memberStats.memberGrowth', []);
+          const messageActivity = safeObjectAccess(stats, 'messageStats.activity', []);
+          const topCommands = safeObjectAccess(stats, 'topCommands', []);
+          const roleDistribution = safeObjectAccess(stats, 'roleStats.distribution', []);
           
-          // Log chart data to console for debugging with safe references
           console.log('Chart data available:', { 
-            memberGrowth: safeStats.memberStats.memberGrowth || 'N/A',
-            messageActivity: safeStats.messageStats.activity || 'N/A',
-            topCommands: safeStats.topCommands || 'N/A',
-            roleDistribution: safeStats.roleStats.distribution || 'N/A'
+            memberGrowth, 
+            messageActivity, 
+            topCommands,
+            roleDistribution
           });
           
         } catch (error) {
           console.error('Failed to initialize charts:', error);
-        }
-      }
-      
-      // Add a new modlog entry (for real-time updates)
-      function addModLogEntry(log) {
-        if (!log) return;
-        
-        const modlogsBody = document.getElementById('modlogs-body');
-        
-        if (modlogsBody) {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${log.caseId || 'N/A'}</td>
-            <td><span class="badge badge-${(log.action || 'unknown').toLowerCase()}">${log.action || 'Unknown'}</span></td>
-            <td>${log.user || 'Unknown'}</td>
-            <td>${log.moderator || 'System'}</td>
-            <td>${log.reason || '<em>No reason provided</em>'}</td>
-            <td>${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Unknown'}</td>
-          `;
-          
-          // Insert at the top
-          if (modlogsBody.firstChild) {
-            modlogsBody.insertBefore(row, modlogsBody.firstChild);
-          } else {
-            modlogsBody.appendChild(row);
-          }
-        }
-      }
-
-      async function logout() {
-        try {
-          await fetchJSON('/auth/logout', { method: 'POST' });
-        } catch (error) {
-          console.error('logout failed', error);
-        }
-        showLogin();
-      }
-
-      function showLogin() {
-        // hide inner panels, keep outer shell visible
-        if (emptyState) emptyState.style.display = 'none';
-        if (fullDashboard) fullDashboard.style.display = 'none';
-
-        actionBar.innerHTML = '<a class="button primary" href="/auth/login">Log in with Discord</a>';
-        statusArea.innerHTML = '';
-
-        if (socket) {
-          socket.close();
-          socket = null;
-        }
-      }
-
-      function renderSession(user) {
-        actionBar.innerHTML = `
-          <button class="ghost" id="refresh-btn">Refresh</button>
-          <button class="primary" id="logout-btn">Sign out</button>
-        `;
-        document.getElementById('refresh-btn').addEventListener('click', () => init());
-        document.getElementById('logout-btn').addEventListener('click', logout);
-
-        statusArea.innerHTML = `
-          <div class="status">
-            <div>
-              <strong>${user.username}</strong>
-              <span>signed in</span>
-            </div>
-            <div style="color: var(--muted);">
-              ${user.adminGuilds.length} guild${user.adminGuilds.length === 1 ? '' : 's'} with Manage Server
-            </div>
-          </div>
-        `;
-      }
-
-      async function init() {
-        try {
-          // Show something immediately
-          showInitialScreen();
-          
-          console.log('Dashboard initializing...');
-          
-          // Check if the API endpoint is reachable
-          try {
-            await fetchJSON('/health');
-            console.log('API health check passed');
-          } catch (healthError) {
-            console.error('API health check failed:', healthError);
-            statusArea.innerHTML = '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">API server appears to be offline or unreachable. Please try again later.</div>';
-            return;
-          }
-          
-          const session = await fetchJSON('/auth/session');
-          if (!session.authenticated) {
-            console.log('User not authenticated, showing login');
-            showLogin();
-            return;
-          }
-
-          console.log('User authenticated:', session.user.username);
-          renderSession(session.user);
-
-          if (!session.user.adminGuilds.length) {
-            // no guilds → show empty state
-            console.log('No admin guilds found, showing empty state');
-            if (emptyState) emptyState.style.display = 'block';
-            if (fullDashboard) fullDashboard.style.display = 'none';
-            return;
-          }
-
-          // authenticated & has guilds → show full dashboard
-          console.log('Admin guilds found, showing dashboard');
-          if (emptyState) emptyState.style.display = 'none';
-          if (fullDashboard) fullDashboard.style.display = 'block';
-
-          loadServerList();
-          loadGlobalStats();
-          initWebSocket();
-        } catch (error) {
-          console.error('dashboard init failed', error);
-          showLogin();
           const errorDisplay = document.getElementById('error-display');
           const errorDetails = document.getElementById('error-details');
           
           if (errorDisplay && errorDetails) {
             errorDisplay.style.display = 'block';
-            errorDetails.textContent = `Init Error: ${error.message}\n\nStack: ${error.stack || 'No stack available'}`;
+            errorDetails.textContent += `Chart Error: ${error.message}\n\n`;
           }
-          
-          statusArea.innerHTML = '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Unable to connect to dashboard API. Check console for details.</div>';
         }
       }
       
-      // Global error handler to make errors visible
-      window.addEventListener('error', function(event) {
-        const errorDisplay = document.getElementById('error-display');
-        const errorDetails = document.getElementById('error-details');
+      // Modified WebSocket initialization with better error handling
+      function initWebSocket() {
+        if (socket) {
+          try {
+            socket.close();
+          } catch (e) {
+            console.error('Error closing existing socket:', e);
+          }
+        }
         
-        if (errorDisplay && errorDetails) {
-          errorDisplay.style.display = 'block';
-          errorDetails.textContent += `Error: ${event.message}\nAt: ${event.filename}:${event.lineno}:${event.colno}\n\n`;
-          console.error('Caught error:', event);
+        try {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          // Use a direct path rather than hostname to avoid CORS issues
+          const wsUrl = `${protocol}//${window.location.host}/ws`;
+          
+          console.log(`Connecting to WebSocket at ${wsUrl}`);
+          
+          // Display connection attempt status
+          statusArea.innerHTML += `<div class="status" style="background: rgba(56, 189, 248, 0.08); border-color: rgba(56, 189, 248, 0.2); margin-bottom: 10px;">
+            Attempting to connect to WebSocket at ${wsUrl}...
+          </div>`;
+          
+          socket = new WebSocket(wsUrl);
+          
+          socket.onopen = function() {
+            console.log('WebSocket connected successfully');
+            updateConnectionStatus(true);
+            reconnectAttempts = 0; 
+            
+            // Update status message
+            const statusElements = statusArea.getElementsByClassName('status');
+            if (statusElements.length > 0) {
+              statusElements[statusElements.length - 1].innerHTML = 'WebSocket connected successfully! Real-time updates enabled.';
+            }
+            
+            sendHeartbeat();
+          };
+          
+          socket.onclose = function(event) {
+            console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+            updateConnectionStatus(false);
+            
+            // Exponential backoff for reconnection (max 30 seconds)
+            const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            console.log(`Attempting to reconnect in ${delay/1000} seconds (attempt ${reconnectAttempts})`);
+            setTimeout(initWebSocket, delay);
+          };
+          
+          socket.onmessage = function(event) {
+            try {
+              const data = JSON.parse(event.data);
+              
+              switch (data.type) {
+                case 'stats':
+                  updateStats(data.payload);
+                  break;
+                case 'modlog':
+                  addModLogEntry(data.payload);
+                  break;
+                case 'botStatus':
+                  updateConnectionStatus(data.payload.online);
+                  break;
+                default:
+                  console.log('Received WebSocket message:', data);
+              }
+            } catch (error) {
+              console.error('Error processing WebSocket message:', error, event.data);
+            }
+          };
+
+          socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+          };
+        } catch (error) {
+          console.error('Failed to initialize WebSocket:', error);
+          const errorDisplay = document.getElementById('error-display');
+          const errorDetails = document.getElementById('error-details');
+          
+          if (errorDisplay && errorDetails) {
+            errorDisplay.style.display = 'block';
+            errorDetails.textContent += `WebSocket Error: ${error.message}\n\n`;
+          }
+          
+          statusArea.innerHTML += `<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">
+            WebSocket connection failed: ${error.message} - Using fallback polling for updates.
+          </div>`;
+          
+          // Implement a fallback to polling if WebSockets fail
+          startPolling();
+        }
+      }
+      
+      // Fallback polling function for when WebSockets fail
+      function startPolling() {
+        console.log('Starting polling fallback');
+        // Poll every 10 seconds
+        window.pollingInterval = setInterval(async () => {
+          try {
+            const stats = await fetchJSON('/api/admin/stats');
+            updateStats(stats);
+          } catch (error) {
+            console.error('Polling failed:', error);
+          }
+        }, 10000);
+      }
+
+      // Stop polling if it's running
+      function stopPolling() {
+        if (window.pollingInterval) {
+          clearInterval(window.pollingInterval);
+          window.pollingInterval = null;
+        }
+      }
+
+      // Heartbeat mechanism
+      function sendHeartbeat() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.send(JSON.stringify({ type: 'heartbeat' }));
+          } catch (error) {
+            console.error('Error sending heartbeat:', error);
+          }
+        }
+        setTimeout(sendHeartbeat, 30000); // Send heartbeat every 30 seconds
+      }
+      
+      function updateConnectionStatus(online) {
+        if (connectionIndicator && connectionText) {
+          if (online) {
+            connectionIndicator.className = 'status-indicator status-online';
+            connectionText.textContent = 'Bot online';
+          } else {
+            connectionIndicator.className = 'status-indicator status-offline';
+            connectionText.textContent = 'Bot offline';
+          }
+        }
+      }
+      
+      // Navigation between panels
+      navItems.forEach(item => {
+        item.addEventListener('click', () => {
+          const targetPanel = item.getAttribute('data-panel');
+          
+          // Update active nav item
+          navItems.forEach(nav => nav.classList.remove('active'));
+          item.classList.add('active');
+          
+          // Show target panel, hide others
+          panels.forEach(panel => {
+            if (panel.id === `panel-${targetPanel}`) {
+              panel.classList.add('active');
+            } else {
+              panel.classList.remove('active');
+            }
+          });
+        });
+      });
+      
+      // Load server list
+      async function loadServerList() {
+        try {
+          const guilds = await fetchJSON('/api/admin/guilds');
+          if (!serverSelect) return;
+
+          serverSelect.innerHTML = '';
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = 'Select a server...';
+          placeholder.disabled = guilds.length === 1;
+          placeholder.hidden = guilds.length === 1;
+          serverSelect.appendChild(placeholder);
+
+          guilds.forEach(guild => {
+            const option = document.createElement('option');
+            option.value = guild.id;
+            option.textContent = guild.name;
+            serverSelect.appendChild(option);
+          });
+
+          if (guilds.length === 1) {
+            serverSelect.value = guilds[0].id;
+            serverSelect.disabled = true;
+            await loadGuildData(guilds[0].id);
+            if (connectionText) {
+              connectionText.textContent = guilds[0].name;
+            }
+          }
+
+          if (!serverSelect.hasAttribute('data-listener')) {
+            serverSelect.addEventListener('change', () => {
+              const guildId = serverSelect.value;
+              if (guildId) {
+                loadGuildData(guildId);
+              }
+            });
+            serverSelect.setAttribute('data-listener', 'true');
+          }
+
+          if (guilds.length > 1 && !serverSelect.value && guilds[0]) {
+            serverSelect.value = guilds[0].id;
+            loadGuildData(guilds[0].id);
+          }
+        } catch (error) {
+          console.error('Failed to load server list:', error);
+          statusArea.innerHTML += '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load server list. Check console for details.</div>';
+        }
+      }
+      
+      // Load guild-specific data
+      async function loadGuildData(guildId) {
+        try {
+          currentGuildId = guildId;
+          const guildData = await fetchJSON(`/api/admin/guilds/${guildId}`);
+          
+          // Update stats - with null checking
+          const memberCountElement = document.getElementById('stat-users');
+          if (memberCountElement && guildData && guildData.memberCount !== undefined) {
+            memberCountElement.textContent = new Intl.NumberFormat().format(guildData.memberCount);
+          }
+          
+          // Update channels and roles dropdowns - with null checking
+          if (guildData.channels) updateChannelsDropdown(guildData.channels);
+          if (guildData.roles) updateRolesDropdown(guildData.roles);
+          if (guildData.channels) updateConsoleDropdown(guildData.channels);
+          
+          // Load command settings
+          loadCommandSettings(guildId);
+          
+          // Load moderation logs
+          loadModerationLogs(guildId);
+          
+          // Load guild settings
+          loadGuildSettings(guildId);
+        } catch (error) {
+          console.error('Failed to load guild data:', error);
+          statusArea.innerHTML += `<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load data for guild ${guildId}. Check console for details.</div>`;
+        }
+      }
+      
+      // Update channels dropdown
+      function updateChannelsDropdown(channels) {
+        try {
+          const welcomeChannel = document.getElementById('welcome-channel');
+          const leaveChannel = document.getElementById('leave-channel');
+          
+          if (!welcomeChannel || !leaveChannel) return;
+          
+          welcomeChannel.innerHTML = '<option value="">Select channel...</option>';
+          leaveChannel.innerHTML = '<option value="">Select channel...</option>';
+          
+          channels.forEach(channel => {
+            if (channel.type === 'GUILD_TEXT' || channel.type === 0) { // 0 is GUILD_TEXT in newer Discord API
+              const option1 = document.createElement('option');
+              option1.value = channel.id;
+              option1.textContent = `#${channel.name}`;
+              welcomeChannel.appendChild(option1);
+              
+              const option2 = document.createElement('option');
+              option2.value = channel.id;
+              option2.textContent = `#${channel.name}`;
+              leaveChannel.appendChild(option2);
+            }
+          });
+        } catch (error) {
+          console.error('Failed to update channels dropdown:', error);
+        }
+      }
+      
+      // Update roles dropdown
+      function updateRolesDropdown(roles) {
+        try {
+          const adminRole = document.getElementById('admin-role');
+          const modRole = document.getElementById('mod-role');
+          const djRole = document.getElementById('dj-role');
+          
+          if (!adminRole || !modRole || !djRole) return;
+          
+          adminRole.innerHTML = '<option value="">Select role...</option>';
+          modRole.innerHTML = '<option value="">Select role...</option>';
+          djRole.innerHTML = '<option value="">Select role...</option>';
+          
+          roles.forEach(role => {
+            const option1 = document.createElement('option');
+            option1.value = role.id;
+            option1.textContent = role.name;
+            adminRole.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = role.id;
+                       option2.textContent = role.name;
+            modRole.appendChild(option2);
+            
+            const option3 = document.createElement('option');
+            option3.value = role.id;
+            option3.textContent = role.name;
+            djRole.appendChild(option3);
+          });
+        } catch (error) {
+          console.error('Failed to update roles dropdown:', error);
+        }
+      }
+      
+      // Update console channel dropdown - new function
+      function updateConsoleDropdown(channels) {
+        try {
+          const consoleChannel = document.getElementById('console-channel');
+          if (!consoleChannel) return;
+          
+          consoleChannel.innerHTML = '<option value="">Select channel...</option>';
+          
+          channels.forEach(channel => {
+            if (channel.type === 'GUILD_TEXT' || channel.type === 0) {
+              const option = document.createElement('option');
+              option.value = channel.id;
+              option.textContent = `#${channel.name}`;
+              consoleChannel.appendChild(option);
+            }
+          });
+        } catch (error) {
+          console.error('Failed to update console dropdown:', error);
+        }
+      }
+      
+      // Load command settings
+      async function loadCommandSettings(guildId) {
+        try {
+          const commands = await fetchJSON(`/api/admin/guilds/${guildId}/commands`);
+          const commandsList = document.getElementById('commands-list');
+          
+          if (!commandsList) return;
+          
+          commandsList.innerHTML = '';
+          
+          if (!commands || !Array.isArray(commands) || commands.length === 0) {
+            commandsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">No commands available or commands data could not be loaded.</div>';
+            return;
+          }
+          
+          commands.forEach(command => {
+            const commandItem = document.createElement('div');
+            commandItem.className = 'command-item';
+            commandItem.innerHTML = `
+              <div class="command-name">${command.name || 'Unknown'}</div>
+              <label class="toggle-switch">
+                <input type="checkbox" data-command="${command.id}" ${command.enabled ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+              </label>
+            `;
+            commandsList.appendChild(commandItem);
+          });
+          
+          // Category toggles
+          document.querySelectorAll('[id^="toggle-category-"]').forEach(toggle => {
+            toggle.addEventListener('change', function() {
+              const category = this.id.replace('toggle-category-', '');
+              const categoryCommands = commands.filter(cmd => cmd.category === category);
+              const categoryCommandIds = categoryCommands.map(cmd => cmd.id);
+              
+              document.querySelectorAll(`[data-command]`).forEach(checkbox => {
+                if (categoryCommandIds.includes(checkbox.getAttribute('data-command'))) {
+                  checkbox.checked = this.checked;
+                }
+              });
+            });
+          });
+          
+          // Save button
+          const saveBtn = document.getElementById('btn-save-commands');
+          if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+              const updatedCommands = [];
+              
+              document.querySelectorAll('[data-command]').forEach(checkbox => {
+                updatedCommands.push({
+                  id: checkbox.getAttribute('data-command'),
+                  enabled: checkbox.checked
+                });
+              });
+              
+              try {
+                await fetchJSON(`/api/admin/guilds/${guildId}/commands`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ commands: updatedCommands })
+                });
+                
+                alert('Command settings saved successfully!');
+              } catch (error) {
+                console.error('Failed to save command settings:', error);
+                alert('Failed to save command settings. Please try again.');
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Failed to load command settings:', error);
+          const commandsList = document.getElementById('commands-list');
+          if (commandsList) {
+            commandsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">Failed to load commands. Check console for details.</div>';
+          }
+        }
+      }
+      
+      // Load moderation logs
+      async function loadModerationLogs(guildId) {
+        try {
+          const modlogs = await fetchJSON(`/api/admin/guilds/${guildId}/modlogs`);
+          const modlogsBody = document.getElementById('modlogs-body');
+          
+          if (!modlogsBody) return;
+          
+          modlogsBody.innerHTML = '';
+          
+          if (!modlogs || !Array.isArray(modlogs) || modlogs.length === 0) {
+            modlogsBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--muted);">No moderation logs available.</td></tr>';
+            return;
+          }
+          
+          modlogs.forEach(log => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${log.caseId || 'N/A'}</td>
+              <td><span class="badge badge-${(log.action || 'unknown').toLowerCase()}">${log.action || 'Unknown'}</span></td>
+              <td>${log.user || 'Unknown'}</td>
+              <td>${log.moderator || 'System'}</td>
+              <td>${log.reason || '<em>No reason provided</em>'}</td>
+              <td>${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Unknown'}</td>
+            `;
+            modlogsBody.appendChild(row);
+          });
+          
+          // Search and filter
+          const search = document.getElementById('modlogs-search');
+          const filter = document.getElementById('modlogs-filter');
+          
+          if (!search || !filter) return;
+          
+          function filterModlogs() {
+            const searchTerm = search.value.toLowerCase();
+            const filterValue = filter.value;
+            
+            Array.from(modlogsBody.children).forEach(row => {
+              if (row.children.length < 6) return; // Skip invalid rows
+              
+              const action = row.children[1].textContent.toLowerCase();
+              const user = row.children[2].textContent.toLowerCase();
+              const moderator = row.children[3].textContent.toLowerCase();
+              const reason = row.children[4].textContent.toLowerCase();
+              
+              const matchesSearch = !searchTerm || 
+                user.includes(searchTerm) || 
+                moderator.includes(searchTerm) || 
+                reason.includes(searchTerm);
+                
+              const matchesFilter = filterValue === 'all' || action === filterValue;
+              
+              row.style.display = matchesSearch && matchesFilter ? '' : 'none';
+            });
+          }
+          
+          search.addEventListener('input', filterModlogs);
+          filter.addEventListener('change', filterModlogs);
+        } catch (error) {
+          console.error('Failed to load moderation logs:', error);
+          const modlogsBody = document.getElementById('modlogs-body');
+          if (modlogsBody) {
+            modlogsBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--muted);">Failed to load moderation logs. Check console for details.</td></tr>';
+          }
+        }
+      }
+      
+      // Load guild settings
+      async function loadGuildSettings(guildId) {
+        try {
+          const settings = await fetchJSON(`/api/admin/guilds/${guildId}/settings`);
+          
+          // Only set values if elements and settings exist
+          const botPrefix = document.getElementById('bot-prefix');
+          if (botPrefix) botPrefix.value = settings?.prefix || '!';
+          
+          const toggleSlashCommands = document.getElementById('toggle-slash-commands');
+          if (toggleSlashCommands) toggleSlashCommands.checked = settings?.slashCommands !== false;
+          
+          const welcomeChannel = document.getElementById('welcome-channel');
+          if (welcomeChannel) welcomeChannel.value = settings?.welcomeChannelId || '';
+          
+          const welcomeMessage = document.getElementById('welcome-message');
+          if (welcomeMessage) welcomeMessage.value = settings?.welcomeMessage || '';
+          
+          const toggleWelcome = document.getElementById('toggle-welcome');
+          if (toggleWelcome) toggleWelcome.checked = settings?.welcomeEnabled !== false;
+          
+          const leaveChannel = document.getElementById('leave-channel');
+          if (leaveChannel) leaveChannel.value = settings?.leaveChannelId || '';
+          
+          const leaveMessage = document.getElementById('leave-message');
+          if (leaveMessage) leaveMessage.value = settings?.leaveMessage || '';
+          
+          const toggleLeave = document.getElementById('toggle-leave');
+          if (toggleLeave) toggleLeave.checked = settings?.leaveEnabled !== false;
+          
+          const adminRole = document.getElementById('admin-role');
+          if (adminRole) adminRole.value = settings?.adminRoleId || '';
+          
+          const modRole = document.getElementById('mod-role');
+          if (modRole) modRole.value = settings?.modRoleId || '';
+          
+          const djRole = document.getElementById('dj-role');
+          if (djRole) djRole.value = settings?.djRoleId || '';
+          
+          // Setup form submission handlers
+          setupFormSubmitHandlers(guildId);
+        } catch (error) {
+          console.error('Failed to load guild settings:', error);
+        }
+      }
+      
+      // Setup form submission handlers - separate function for cleaner code
+      function setupFormSubmitHandlers(guildId) {
+        // Bot settings form
+        const botSettingsForm = document.getElementById('bot-settings-form');
+        if (botSettingsForm) {
+          botSettingsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const botPrefix = document.getElementById('bot-prefix');
+            const toggleSlashCommands = document.getElementById('toggle-slash-commands');
+            
+            if (!botPrefix || !toggleSlashCommands) return;
+            
+            const botSettings = {
+              prefix: botPrefix.value,
+              slashCommands: toggleSlashCommands.checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/bot`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(botSettings)
+              });
+              
+              alert('Bot settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save bot settings:', error);
+              alert('Failed to save bot settings. Please try again.');
+            }
+          });
+        }
+        
+        // Welcome settings form
+        const welcomeSettingsForm = document.getElementById('welcome-settings-form');
+        if (welcomeSettingsForm) {
+          welcomeSettingsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const welcomeChannel = document.getElementById('welcome-channel');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const toggleWelcome = document.getElementById('toggle-welcome');
+            
+            if (!welcomeChannel || !welcomeMessage || !toggleWelcome) return;
+            
+            const welcomeSettings = {
+              welcomeChannelId: welcomeChannel.value,
+              welcomeMessage: welcomeMessage.value,
+              welcomeEnabled: toggleWelcome.checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/welcome`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(welcomeSettings)
+              });
+              
+              alert('Welcome settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save welcome settings:', error);
+              alert('Failed to save welcome settings. Please try again.');
+            }
+          });
+        }
+        
+        // Leave settings form
+        const leaveSettingsForm = document.getElementById('leave-settings-form');
+        if (leaveSettingsForm) {
+          leaveSettingsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const leaveChannel = document.getElementById('leave-channel');
+            const leaveMessage = document.getElementById('leave-message');
+            const toggleLeave = document.getElementById('toggle-leave');
+            
+            if (!leaveChannel || !leaveMessage || !toggleLeave) return;
+            
+            const leaveSettings = {
+              leaveChannelId: leaveChannel.value,
+              leaveMessage: leaveMessage.value,
+              leaveEnabled: toggleLeave.checked
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/leave`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(leaveSettings)
+              });
+              
+              alert('Leave settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save leave settings:', error);
+              alert('Failed to save leave settings. Please try again.');
+            }
+          });
+        }
+        
+        // Permissions settings form
+        const permissionsSettingsForm = document.getElementById('permissions-settings-form');
+        if (permissionsSettingsForm) {
+          permissionsSettingsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const adminRole = document.getElementById('admin-role');
+            const modRole = document.getElementById('mod-role');
+            const djRole = document.getElementById('dj-role');
+            
+            if (!adminRole || !modRole || !djRole) return;
+            
+            const permissionSettings = {
+              adminRoleId: adminRole.value,
+              modRoleId: modRole.value,
+              djRoleId: djRole.value
+            };
+            
+            try {
+              await fetchJSON(`/api/admin/guilds/${guildId}/settings/permissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(permissionSettings)
+              });
+              
+              alert('Permission settings saved successfully!');
+            } catch (error) {
+              console.error('Failed to save permission settings:', error);
+              alert('Failed to save permission settings. Please try again.');
+            }
+          });
+        }
+      }
+      
+      // Load global bot stats
+      async function loadGlobalStats() {
+        try {
+          const stats = await fetchJSON('/api/admin/stats');
+          
+          // Safely update stats with null checking
+          const updateElement = (id, value, formatter = null) => {
+            const element = document.getElementById(id);
+            if (element && value !== undefined) {
+              element.textContent = formatter ? formatter(value) : value;
+            }
+          };
+          
+          const numberFormatter = new Intl.NumberFormat().format;
+          
+          updateElement('stat-servers', stats?.servers, numberFormatter);
+          updateElement('stat-users', stats?.users, numberFormatter);
+          updateElement('stat-latency', stats?.latency, (val) => `${val} ms`);
+          updateElement('stat-commands', stats?.commandsToday, numberFormatter);
+          
+          // Handle memberGrowth chart - this is likely where the error occurs
+          handleCharts(stats);
+          
+        } catch (error) {
+          console.error('Failed to load global stats:', error);
+          // Show error message to user
+          statusArea.innerHTML += '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Failed to load global stats. Check console for details.</div>';
+        }
+      }
+      
+      // Clean up events when leaving page
+      window.addEventListener('beforeunload', function() {
+        stopPolling();
+        if (socket) {
+          socket.close();
         }
       });
 
-      // Make initial screen visible regardless of authentication
-      function showInitialScreen() {
-        // Force the shell to be visible with basic content
-        const dashboard = document.getElementById('dashboard');
-        if (dashboard) {
-          dashboard.style.display = 'block';
-          
-          const statusArea = document.getElementById('status-area');
-          if (statusArea) {
-            statusArea.innerHTML = `
-              <div class="status">
-                <div>
-                  <strong>Dashboard Loading</strong>
-                  <span>Please wait while we initialize...</span>
-                </div>
-                <div style="color: var(--muted);">
-                  If this message persists, please check the console for errors.
-                </div>
-              </div>
-            `;
-          }
-        }
-      }
-      
-      // Call init after DOM is loaded AND show a message immediately
-      document.addEventListener('DOMContentLoaded', function() {
-        showInitialScreen();
-      });
-      
-      // Start the application
-      console.log('Starting dashboard application...');
-      window.addEventListener('load', init);
-    </script>
-  </body>
-</html>
-            alert('Bot restart initiated!');
-          } catch (err) {
-            console.error('Bot restart failed:', err);
-            alert('Failed to restart bot. Check console.');
-          }
-        });
-      }
-      
-      const syncCommandsBtn = document.getElementById('btn-sync-commands');
-      if (syncCommandsBtn) {
-        syncCommandsBtn.addEventListener('click', async () => {
-          try {
-            await fetchJSON('/api/admin/sync-commands', { method: 'POST' });
-            alert('Commands synchronized successfully!');
-          } catch (err) {
-            console.error('Command sync failed:', err);
-            alert('Failed to sync commands. Check console.');
-          }
-        });
-      }
-      
-      const clearCacheBtn = document.getElementById('btn-clear-cache');
-      if (clearCacheBtn) {
-        clearCacheBtn.addEventListener('click', async () => {
-          try {
-            await fetchJSON('/api/admin/clear-cache', { method: 'POST' });
-            alert('Cache cleared successfully!');
-          } catch (err) {
-            console.error('Cache clear failed:', err);
-            alert('Failed to clear cache. Check console.');
-          }
-        });
-      }
-      
       // Start the application
       console.log('Starting dashboard application...');
       window.addEventListener('load', init);
