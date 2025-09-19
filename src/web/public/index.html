@@ -957,7 +957,7 @@
                 <button class="primary" id="btn-console-send">Send as Bot</button>
               </div>
             </div>
-          </div>
+          </div>          
         </div>
       </section>
 
@@ -1008,12 +1008,25 @@
           const wsUrl = `${protocol}//${window.location.host}/ws`;
           
           console.log(`Connecting to WebSocket at ${wsUrl}`);
+          
+          // Add a status message to show connection attempt
+          statusArea.innerHTML += `<div class="status" style="background: rgba(56, 189, 248, 0.08); border-color: rgba(56, 189, 248, 0.2); margin-bottom: 10px;">
+            Attempting to connect to WebSocket...
+          </div>`;
+          
           socket = new WebSocket(wsUrl);
           
           socket.onopen = function() {
             console.log('WebSocket connected');
             updateConnectionStatus(true);
             reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+            
+            // Replace status message on successful connection
+            statusArea.innerHTML = statusArea.innerHTML.replace(
+              /Attempting to connect to WebSocket/g, 
+              'WebSocket connected successfully'
+            );
+            
             sendHeartbeat(); // Start sending heartbeats
           };
           
@@ -1055,6 +1068,10 @@
           };
         } catch (error) {
           console.error('Failed to initialize WebSocket:', error);
+          statusArea.innerHTML += `<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">
+            WebSocket connection failed: ${error.message}
+          </div>`;
+          
           // Still try to reconnect
           setTimeout(initWebSocket, 5000);
         }
@@ -1625,7 +1642,7 @@
         }
       }
       
-      // Safely handle chart data initialization
+      // Safely handle chart data initialization with better error handling
       function handleCharts(stats) {
         try {
           // For now, we'll just add placeholder content to chart containers
@@ -1644,12 +1661,20 @@
             }
           });
           
-          // Log chart data to console for debugging
+          // Create safe references to potentially missing data to prevent the memberGrowth error
+          const safeStats = {
+            memberStats: stats?.memberStats || { memberGrowth: [] },
+            messageStats: stats?.messageStats || { activity: [] },
+            topCommands: stats?.topCommands || [],
+            roleStats: stats?.roleStats || { distribution: [] }
+          };
+          
+          // Log chart data to console for debugging with safe references
           console.log('Chart data available:', { 
-            memberGrowth: stats?.memberStats?.memberGrowth || 'N/A',
-            messageActivity: stats?.messageStats?.activity || 'N/A',
-            topCommands: stats?.topCommands || 'N/A',
-            roleDistribution: stats?.roleStats?.distribution || 'N/A'
+            memberGrowth: safeStats.memberStats.memberGrowth || 'N/A',
+            messageActivity: safeStats.messageStats.activity || 'N/A',
+            topCommands: safeStats.topCommands || 'N/A',
+            roleDistribution: safeStats.roleStats.distribution || 'N/A'
           });
           
         } catch (error) {
