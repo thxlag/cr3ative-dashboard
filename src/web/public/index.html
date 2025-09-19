@@ -509,6 +509,12 @@
         </div>
       </header>
 
+      <!-- Add a visible error display area -->
+      <section id="error-display" style="color: #f87171; background: rgba(248, 113, 113, 0.12); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: none;">
+        <h3 style="margin-top: 0;">Error Information</h3>
+        <pre id="error-details" style="overflow: auto; white-space: pre-wrap;"></pre>
+      </section>
+
       <section id="status-area"></section>
 
       <!-- Main Dashboard Layout with Sidebar -->
@@ -1754,7 +1760,21 @@
 
       async function init() {
         try {
+          // Show something immediately
+          showInitialScreen();
+          
           console.log('Dashboard initializing...');
+          
+          // Check if the API endpoint is reachable
+          try {
+            await fetchJSON('/health');
+            console.log('API health check passed');
+          } catch (healthError) {
+            console.error('API health check failed:', healthError);
+            statusArea.innerHTML = '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">API server appears to be offline or unreachable. Please try again later.</div>';
+            return;
+          }
+          
           const session = await fetchJSON('/auth/session');
           if (!session.authenticated) {
             console.log('User not authenticated, showing login');
@@ -1784,85 +1804,65 @@
         } catch (error) {
           console.error('dashboard init failed', error);
           showLogin();
+          const errorDisplay = document.getElementById('error-display');
+          const errorDetails = document.getElementById('error-details');
+          
+          if (errorDisplay && errorDetails) {
+            errorDisplay.style.display = 'block';
+            errorDetails.textContent = `Init Error: ${error.message}\n\nStack: ${error.stack || 'No stack available'}`;
+          }
+          
           statusArea.innerHTML = '<div class="status" style="background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); color: #fca5a5;">Unable to connect to dashboard API. Check console for details.</div>';
         }
       }
-
-      // Add missing updateStats function with defensive coding
-      function updateStats(data) {
-        if (!data) {
-          console.warn('Received empty stats data');
-          return;
-        }
+      
+      // Global error handler to make errors visible
+      window.addEventListener('error', function(event) {
+        const errorDisplay = document.getElementById('error-display');
+        const errorDetails = document.getElementById('error-details');
         
-        try {
-          // Update server count
-          const serversElement = document.getElementById('stat-servers');
-          if (serversElement && data.servers !== undefined) {
-            serversElement.textContent = new Intl.NumberFormat().format(data.servers);
-          }
+        if (errorDisplay && errorDetails) {
+          errorDisplay.style.display = 'block';
+          errorDetails.textContent += `Error: ${event.message}\nAt: ${event.filename}:${event.lineno}:${event.colno}\n\n`;
+          console.error('Caught error:', event);
+        }
+      });
+
+      // Make initial screen visible regardless of authentication
+      function showInitialScreen() {
+        // Force the shell to be visible with basic content
+        const dashboard = document.getElementById('dashboard');
+        if (dashboard) {
+          dashboard.style.display = 'block';
           
-          // Update user count
-          const usersElement = document.getElementById('stat-users');
-          if (usersElement && data.users !== undefined) {
-            usersElement.textContent = new Intl.NumberFormat().format(data.users);
+          const statusArea = document.getElementById('status-area');
+          if (statusArea) {
+            statusArea.innerHTML = `
+              <div class="status">
+                <div>
+                  <strong>Dashboard Loading</strong>
+                  <span>Please wait while we initialize...</span>
+                </div>
+                <div style="color: var(--muted);">
+                  If this message persists, please check the console for errors.
+                </div>
+              </div>
+            `;
           }
-          
-          // Update latency
-          const latencyElement = document.getElementById('stat-latency');
-          if (latencyElement && data.latency !== undefined) {
-            latencyElement.textContent = `${data.latency} ms`;
-          }
-          
-          // Update commands today
-          const commandsElement = document.getElementById('stat-commands');
-          if (commandsElement && data.commandsToday !== undefined) {
-            commandsElement.textContent = new Intl.NumberFormat().format(data.commandsToday);
-          }
-          
-          // Update charts if needed
-          handleCharts(data);
-        } catch (error) {
-          console.error('Error updating stats:', error);
         }
       }
       
-      // Setup console message sending
-      const consoleSendBtn = document.getElementById('btn-console-send');
-      if (consoleSendBtn) {
-        consoleSendBtn.addEventListener('click', async () => {
-          const channelId = document.getElementById('console-channel')?.value;
-          const content = document.getElementById('console-input')?.value?.trim();
-          
-          if (!currentGuildId || !channelId || !content) {
-            return alert('Select a server, channel, and enter a message.');
-          }
-          
-          try {
-            await fetchJSON(`/api/admin/guilds/${currentGuildId}/console`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ channelId, content })
-            });
-            
-            alert('Message sent!');
-            const consoleInput = document.getElementById('console-input');
-            if (consoleInput) consoleInput.value = '';
-          } catch (err) {
-            console.error('Console send failed:', err);
-            alert('Failed to send message. Check console.');
-          }
-        });
-      }
+      // Call init after DOM is loaded AND show a message immediately
+      document.addEventListener('DOMContentLoaded', function() {
+        showInitialScreen();
+      });
       
-      // Add event listeners for quick action buttons
-      const restartBtn = document.getElementById('btn-restart-bot');
-      if (restartBtn) {
-        restartBtn.addEventListener('click', async () => {
-          if (!confirm('Are you sure you want to restart the bot?')) return;
-          
-          try {
-            await fetchJSON('/api/admin/restart', { method: 'POST' });
+      // Start the application
+      console.log('Starting dashboard application...');
+      window.addEventListener('load', init);
+    </script>
+  </body>
+</html>
             alert('Bot restart initiated!');
           } catch (err) {
             console.error('Bot restart failed:', err);
